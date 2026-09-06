@@ -30,7 +30,9 @@ from factory_lib import (
 )
 
 from .common import fail
-from .review_brief import VERDICT_INSTRUCTION, _task_section, cmd_review_brief
+from .review_brief import (
+    LEFTOVER_INSTRUCTION, VERDICT_INSTRUCTION, _task_section, cmd_review_brief,
+)
 # Reuse the task module's git helpers rather than adding another lossless
 # capture site: theirs is already reviewed and content-pinned for path output.
 from .tasks import _git, _require_git
@@ -134,7 +136,7 @@ def _product_dirty(base: Path) -> list[str]:
 
 def _lens_prompt(task: dict, lens: str, base: Path | None = None) -> bytes:
     lines = [f"# Review brief — {task.get('id', '')} — {lens} lens", "",
-             COMMON_PREAMBLE, LENS_FOCUS[lens]]
+             COMMON_PREAMBLE, LENS_FOCUS[lens], LEFTOVER_INSTRUCTION]
     if lens == "quality":
         lines += [QUALITY_VERDICT_FORMAT, VERDICT_INSTRUCTION, ""]
     lines += _task_section(task, base)

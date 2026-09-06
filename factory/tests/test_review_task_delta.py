@@ -214,3 +214,17 @@ def test_contract_verdicts_read_every_preserved_pass_report_and_keep_the_worst()
     assert "races the index" in out["T1-AC2"]["evidence"]
     assert out["T1-AC3"]["verdict"] == "missing"
     assert "no VERDICT line" not in out["T1-AC1"]["evidence"]
+
+
+def test_every_lens_brief_hunts_for_compatibility_leftovers():
+    """Owner ruling: no legacy code. Every lens prompt carries the leftover
+    instruction (wrappers, shims, aliases, retained symbols, dead branches,
+    'legacy' naming are blocking and verdict the contract partial)."""
+    from forge_cli.review import _lens_prompt
+    from forge_cli.review_brief import LEFTOVER_INSTRUCTION
+
+    task = {"id": "T1", "plan_contracts": [], "reviewer_focus": "focus"}
+    for lens in ("quality", "performance", "security"):
+        text = _lens_prompt(task, lens).decode()
+        assert LEFTOVER_INSTRUCTION in text, lens
+        assert "BLOCKING" in LEFTOVER_INSTRUCTION
