@@ -14450,6 +14450,16 @@ def test_verify_refuses_to_guess_a_toolchain(repo, tmp_path):
     # developer with these exported would otherwise not exercise the refusal.
     blank = {"FACTORY_STRUCTURAL_CMD": "", "FACTORY_TYPECHECK_CMD": "",
              "FACTORY_TEST_CMD": ""}
+    # verify reads .envrc directly now, and the scratch repo copies the tree it
+    # was scaffolded from — a vendored CLIENT declares its commands there
+    # unconditionally, which would fill the blanks and defeat this refusal.
+    # Blank those exports too: the property under test is "nothing declared".
+    envrc = repo / ".envrc"
+    if envrc.exists():
+        envrc.write_text("\n".join(
+            line for line in envrc.read_text(encoding="utf-8").splitlines()
+            if not line.strip().startswith("export FACTORY_")
+        ) + "\n", encoding="utf-8")
     code, out = run(repo, "verify.py", env=blank)
     assert code != 0
     assert "not configured" in out
