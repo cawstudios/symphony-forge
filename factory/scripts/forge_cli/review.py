@@ -30,7 +30,9 @@ from factory_lib import (
 )
 
 from .common import fail
-from .review_brief import VERDICT_INSTRUCTION, _task_section, cmd_review_brief
+from .review_brief import (
+    LEFTOVER_INSTRUCTION, VERDICT_INSTRUCTION, _task_section, cmd_review_brief,
+)
 # Reuse the task module's git helpers rather than adding another lossless
 # capture site: theirs is already reviewed and content-pinned for path output.
 from .tasks import _git, _require_git
@@ -134,7 +136,7 @@ def _product_dirty(base: Path) -> list[str]:
 
 def _lens_prompt(task: dict, lens: str, base: Path | None = None) -> bytes:
     lines = [f"# Review brief — {task.get('id', '')} — {lens} lens", "",
-             COMMON_PREAMBLE, LENS_FOCUS[lens]]
+             COMMON_PREAMBLE, LENS_FOCUS[lens], LEFTOVER_INSTRUCTION]
     if lens == "quality":
         lines += [QUALITY_VERDICT_FORMAT, VERDICT_INSTRUCTION, ""]
     lines += _task_section(task, base)
@@ -218,16 +220,40 @@ def _recommendation(blocking: int, non_blocking: int) -> str:
     return "approve-with-caveats" if non_blocking else "approve"
 
 
+_VERDICT_SEVERITY = {"implemented": 0, "partial": 1, "missing": 2}
+
+
 def _parse_verdicts(texts: list[str]) -> dict[str, tuple[str, str]]:
+    """One verdict per contract across every text; when a contract is verdicted
+    more than once (a chunked review emits one VERDICT line per pass) the WORST
+    verdict wins — missing over partial over implemented — so a pass that saw
+    a defect is never outvoted by a pass that only saw the files exist."""
     verdicts: dict[str, tuple[str, str]] = {}
     for text in texts:
         for match in VERDICT_LINE.finditer(text or ""):
-            verdicts.setdefault(
-                match.group("id").strip(),
-                (match.group("verdict").lower(),
-                 (match.group("evidence") or "").strip() or "reviewer verdict"),
-            )
+            cid = match.group("id").strip()
+            found = (match.group("verdict").lower(),
+                     (match.group("evidence") or "").strip() or "reviewer verdict")
+            current = verdicts.get(cid)
+            if current is None or (_VERDICT_SEVERITY[found[0]]
+                                   > _VERDICT_SEVERITY[current[0]]):
+                verdicts[cid] = found
     return verdicts
+
+
+def _verdict_texts(reviewed: dict) -> list[str]:
+    """The merged explanation and findings, PLUS every preserved pass report: a
+    chunked autoreview keeps the reviewer's conclusions (and its VERDICT lines)
+    per pass and replaces the top-level explanation with a summary line."""
+    texts = [reviewed.get("overall_explanation", "")]
+    texts += [f.get("body", "") for f in reviewed.get("findings", []) or []]
+    for entry in reviewed.get("pass_reports", []) or []:
+        report = entry.get("report") if isinstance(entry, dict) else None
+        if not isinstance(report, dict):
+            continue
+        texts.append(report.get("overall_explanation", ""))
+        texts += [f.get("body", "") for f in report.get("findings", []) or []]
+    return texts
 
 
 def _contract_verdicts(
@@ -237,8 +263,7 @@ def _contract_verdicts(
     tasks already done are attested as shipped at their own seal; contracts of
     tasks that have not started are not required (recorder, decision 0049)."""
     out: list[dict] = []
-    parsed = _parse_verdicts([reviewed.get("overall_explanation", "")]
-                             + [f.get("body", "") for f in reviewed.get("findings", [])])
+    parsed = _parse_verdicts(_verdict_texts(reviewed))
     for contract in task.get("plan_contracts") or []:
         cid = contract.get("id")
         if not isinstance(cid, str):
