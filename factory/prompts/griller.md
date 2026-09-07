@@ -67,13 +67,21 @@ who did not write it. (EVERY gate is ledger-matched — signoff and epics no
 longer excepted — so no gate can be recorded by a read-only Codex grill alone:
 the top-level session asks the round and records it.)
 
-FRESH CONTEXT, NOT FRESH READING. Every round is a NEW read-only Codex session —
-that independence is the whole point, and it is why the reader has no memory of
-what it already blessed. It does NOT mean re-deriving the plan from scratch every
-round: after the FIRST round, hand the fresh reader the plan AND what changed
-since the last round (the resolutions you just folded in, and which sections they
-touched), and tell it to concentrate there while still refusing anything it can
-see is wrong elsewhere. Same cold judgement, a fraction of the tokens.
+FRESH CONTEXT, AND THE ANSWERS SO FAR. Every round is a NEW read-only Codex
+session — that independence is the whole point. But a reader that knows nothing
+of the earlier rounds does not re-find the same gaps, it finds DIFFERENT ones,
+so the rounds never shrink and the grill has no natural end. `./forge grill run`
+therefore carries every question already put to the human and the answer they
+chose, read from the ledger the recorder validates against.
+
+That gives the reader two obligations: do not re-raise settled questions, and
+CHECK EACH ANSWER — that the artifact honours it, and that it contradicts no
+other answer, accepted decision or constitution rule. An answer can be wrong, or
+right and never applied; saying so is part of the read.
+
+Do NOT tell the reader where to concentrate. A cold read is worth having because
+it is unconstrained, and steering it toward the diff is how the thing nobody
+looked at survives every round. More information, no direction.
 
 END EVERY ROUND WITH AN EXPLICIT CONVERGENCE VERDICT, on its own line, so the
 coordinator never has to guess whether to grill again or approve:

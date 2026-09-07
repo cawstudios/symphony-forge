@@ -100,6 +100,88 @@ def _lessons_section(base: Path, gate: str, task_id: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+# The brief travels to the launcher as a file; the reader's prompt budget is
+# finite. Measured on a 44-round story the whole history was 14.5 KB, so this
+# ceiling is a backstop, not a working limit.
+SETTLED_BUDGET_CHARS = 60_000
+
+
+def _settled_rounds(base: Path, gate: str) -> str:
+    """Every question already answered for this story, and the answer.
+
+    Read from the AskUserQuestion ledger the recorder validates against, not
+    from a summary: a summary would be written by the party whose work is being
+    audited, and it would break the provenance the recorder depends on.
+    """
+    try:
+        from factory_lib import evidence_path, load_json, run_state_path
+        story = load_json(run_state_path(base), default={}).get("issue_key", "")
+        directories = [d for d in (
+            evidence_path(base, story, "grill-rounds"),
+            evidence_path(base, None, "grill-rounds"),
+        ) if d.is_dir()]
+    except Exception:
+        return ""
+
+    seen: set[tuple[str, str]] = set()
+    answered: list[tuple[str, str, str]] = []
+    for directory in dict.fromkeys(directories):
+        for path in sorted(directory.glob("*.json")):
+            try:
+                record = load_json(path, default={})
+            except Exception:
+                # One unreadable record costs THAT record. Letting it escape
+                # loses every settled answer, which is the failure this
+                # section exists to prevent.
+                continue
+            if not isinstance(record, dict):
+                continue
+            when = str(record.get("at") or "")
+            for entry in record.get("questions", []):
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                chosen = str(entry.get("chosen") or "").strip()
+                if not question or not chosen:
+                    continue  # an unanswered round settles nothing
+                key = (question, chosen)
+                if key in seen:
+                    continue
+                seen.add(key)
+                answered.append((when, question, chosen))
+    if not answered:
+        return ""
+
+    answered.sort(key=lambda row: row[0])
+    lines = [f"- Q: {q}\n  A: {a}" for _, q, a in answered]
+
+    # Oldest first when it must be cut, and SAID so. A brief that silently
+    # drops content is how a chunked review lost its verdicts.
+    omitted = 0
+    while sum(len(line) for line in lines) > SETTLED_BUDGET_CHARS and len(lines) > 1:
+        lines.pop(0)
+        omitted += 1
+
+    header = [
+        "## Already answered on this story — verify, do not re-ask",
+        "",
+        "These questions were put to the human and answered. Two obligations:",
+        "",
+        "1. Do NOT raise them again as open questions. They are settled.",
+        "2. DO check each answer still holds — that the artifact actually "
+        "honours it, and that it does not contradict another answer, an "
+        "accepted decision, or the constitution. An answer can be wrong, or "
+        "right and never applied. Saying so is part of this read.",
+        "",
+    ]
+    if omitted:
+        header.append(
+            f"[{omitted} earlier answered question(s) omitted for length — "
+            "ask for them if a gap seems to depend on settled ground.]")
+        header.append("")
+    return "\n".join(header + lines) + "\n"
+
+
 def _compose_brief(base: Path, gate: str, label: str, artifact: str,
                    task_id: str = "") -> str:
     contract = base / "factory" / "prompts" / "griller.md"
@@ -120,6 +202,7 @@ def _compose_brief(base: Path, gate: str, label: str, artifact: str,
         contract_text,
         "",
         _lessons_section(base, gate, task_id),
+        _settled_rounds(base, gate),
         f"## The artifact under interrogation ({label})",
         "",
         artifact,
