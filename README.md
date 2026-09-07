@@ -1,28 +1,49 @@
 # Symphony Forge
 
-KnackLabs's process harness for building applications with **Claude Code coordination** and **Codex execution** — from discovery and client sign-off through scaffolding, per-feature delivery, and a self-evolving record of every decision.
+A governed delivery harness that turns a repo's architecture and decision docs into shipped, reviewed code. **Claude Code coordinates. Codex executes.** Built and run by KnackLabs for client delivery, from discovery and client sign-off through scaffolding, per-feature delivery, and a self-evolving record of every decision.
+
+## In two minutes
+
+- **What it is.** A process harness you vendor into an application repo. Agents write the code; deterministic gates decide what is allowed to ship; every change carries schema-validated evidence of how it was verified.
+- **Where it comes from.** OpenAI's Symphony spec (April 2026): stop supervising agent sessions, start assigning objectives. Forge is that philosophy engineered into a runnable harness. See [Where this comes from](#where-this-comes-from).
+- **How it differs.** Hybrid runtime today (Claude Code coordinates, Codex executes), with a Codex-only runtime planned on the same artifact contract. The repo rather than the issue tracker is the control plane, and governance is enforced instead of left as a non-goal.
+- **Proof it runs.** It is live on client delivery. The [board screenshot](#the-lifecycle) below is a real client project mid-delivery, not a mock.
+- **Where to verify.** [`WORKFLOW.md`](WORKFLOW.md) is the phase contract, [`harness.yaml`](harness.yaml) declares which tool owns each phase, [`AGENTS.md`](AGENTS.md) is the agent contract, and [The Gates](#the-gates) lists every refusal and the script that enforces it.
 
 ## Where this comes from
 
-In April 2026 OpenAI published [*An open-source spec for Codex orchestration: Symphony*](https://openai.com/index/open-source-codex-orchestration-symphony/) ([openai/symphony](https://github.com/openai/symphony), Apache-2.0) — deliberately a philosophy rather than a product: the repo is, in their words, *"technically just a `SPEC.md` file — a definition of the problem and the intended solution."*
+In April 2026 OpenAI published [*An open-source spec for Codex orchestration: Symphony*](https://openai.com/index/open-source-codex-orchestration-symphony/) ([openai/symphony](https://github.com/openai/symphony), Apache-2.0). It is deliberately a philosophy rather than a product: the repo is, in their words, *"technically just a `SPEC.md` file — a definition of the problem and the intended solution."*
 
-Its thesis: the bottleneck in agentic development was never agent speed, it was human attention. Engineers could hold three to five interactive sessions before context-switching ate the gains, so the fix was to stop supervising sessions and start assigning *objectives* — letting teams, as the spec repo puts it, *"manage work instead of supervising coding agents."* On some OpenAI teams, landed pull requests rose 500% in three weeks.
+Its thesis: the bottleneck in agentic development was never agent speed, it was human attention. Engineers could hold three to five interactive sessions before context-switching ate the gains. The fix was to stop supervising sessions and start assigning *objectives*, letting teams, as the spec repo puts it, *"manage work instead of supervising coding agents."* On some OpenAI teams, landed pull requests rose 500% in three weeks.
 
-**Symphony Forge is that philosophy engineered into a harness — and made hybrid rather than Codex-bound.** Three deliberate divergences from the spec:
+**Symphony Forge is that philosophy engineered into a harness, and made hybrid rather than Codex-bound.** Three deliberate divergences from the spec:
 
 | | Symphony (the spec) | Symphony Forge |
 |---|---|---|
-| **Runtime** | Codex, over an app-server protocol | **Claude Code coordinates, Codex executes.** The `.factory` artifact contract is the invariant — any future orchestration must produce the same evidence. |
+| **Runtime** | Codex, over an app-server protocol | **Claude Code coordinates, Codex executes.** A Codex-only runtime, where Codex also coordinates, is planned. The `.factory` artifact contract is the invariant: either runtime must produce the same evidence. |
 | **Source of truth** | The issue tracker is the control plane | **The repo** owns workflow policy, plans, decisions and evidence. An external tracker (Linear, GitHub Issues, Jira) is optional and merely mirrored. |
-| **Governance** | An explicit non-goal — the spec declines to mandate any approval, sandbox, or operator-confirmation posture | **[The gates](#the-gates).** Sign-off, planning lock, evidence attestation, ship gate — refusals, not suggestions. |
+| **Governance** | An explicit non-goal. The spec declines to mandate any approval, sandbox, or operator-confirmation posture | **[The gates](#the-gates).** Sign-off, planning lock, evidence attestation, ship gate. Refusals, not suggestions. |
 
 We kept Symphony's [`WORKFLOW.md`](WORKFLOW.md) convention: workflow policy lives in the repo, versioned alongside the code.
 
-That third row is why this exists. The spec optimises for velocity inside a high-trust internal environment, where one team owns the repo, the risk and the review. Delivery work for a client is not that environment — **throughput without a governance spine just ships defects faster.** The gates are the answer to the risk that speed creates.
+That third row is why this exists. The spec optimises for velocity inside a high-trust internal environment, where one team owns the repo, the risk and the review. Delivery work for a client is not that environment. **Throughput without a governance spine just ships defects faster.** The gates are the answer to the risk that speed creates.
+
+## Where Codex sits
+
+Codex is the executor for everything that touches the codebase: exploration, implementation, tests, and the review. Claude Code never writes product code itself; its hook denies those writes and routes them through `./forge delegate`, which composes a brief and runs the installed [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) companion with a fixed, shell-free argv.
+
+- **Every Codex release is watched.** Workers raise contradiction, confusion, blocked, or scope-change signals and pause; the orchestrating session resolves the signal and resumes. Nothing is fire-and-forget.
+- **Review is one Codex run per task**, three lenses (quality, performance, security), looped with fix delegations until every lens is clean, then recorded as that task's proof.
+- **Evidence enters `.factory/` only through schema-validated recorders.** Each artifact names its generator, and the generator must be on the allowlist in `harness.yaml`.
+- **Reasoning is set per phase**, not globally: `gpt-5.6-sol` at medium for implementation, `gpt-5.6-terra` at high for read-only exploration, `xhigh` reserved for plan validation and root-cause work.
+
+The full contract is in [`AGENTS.md`](AGENTS.md), which both runtimes read. A Codex-only mode, in which Codex coordinates as well as executes, is planned; the gates, recorders, and evidence contract do not change. If the companion is unavailable, [Degraded Mode](docs/degraded-mode.md) is the ledgered exception.
 
 ## Quick Start (devs)
 
-Everything is conversation — setup included. In any Claude Code session, say:
+Prerequisites: Claude Code, the Codex CLI, and codex-plugin-cc. `./forge doctor --fix` installs whatever is missing; only the logins stay yours.
+
+Everything is conversation, setup included. In any Claude Code session, say:
 
 > **"Clone the KnackLabs harness from `github.com/knacklabs/symphony-forge` and run its setup."**
 
@@ -32,13 +53,13 @@ Then, in a session opened in that clone:
 
 > **"Set up a new KnackLabs project called my-app"**
 
-The bootstrap skill updates the harness, checks your machine and installs any missing tooling (only logins stay yours), scaffolds the new repo, asks which GitHub org/repo should own it and pushes it there, then hands you off to work in the new repo. From then on, **ask "what now?" in any phase** — the agent reads the project's recorded state and walks you to the exact next action (Codex sessions get the same answer via `AGENTS.md`). Every step's underlying command lives in [Getting Started](docs/getting-started.md) — the deterministic contract, not something you type.
+The bootstrap skill updates the harness, checks your machine and installs any missing tooling (only logins stay yours), scaffolds the new repo, asks which GitHub org/repo should own it and pushes it there, then hands you off to work in the new repo. From then on, **ask "what now?" in any phase**: the agent reads the project's recorded state and walks you to the exact next action (Codex sessions get the same answer via `AGENTS.md`). Every step's underlying command lives in [Getting Started](docs/getting-started.md), as the deterministic contract, not something you type.
 
-## Template, Not Fork — how client repos relate to this one
+## Template, Not Fork: how client repos relate to this one
 
 The harness is a **dependency you vendor, not an ancestor you fork**. The
-only thing anyone ever clones is this repo, once per machine, as a tool —
-your application is born as its own repo with its own history:
+only thing anyone ever clones is this repo, once per machine, as a tool.
+Your application is born as its own repo with its own history:
 
 ```text
 this repo (cloned once, per machine)             your app repo (its own repo, its own history)
@@ -57,7 +78,7 @@ this repo (cloned once, per machine)             your app repo (its own repo, it
   KnackLabs project called my-app."* The agent checks your machine, scaffolds
   a fresh git-initialized repo beside the harness, asks which GitHub org/repo
   should own it, pushes it there, and tells you to open future sessions in
-  the new repo. The app is built *inside that repo* — the harness clone is
+  the new repo. The app is built *inside that repo*. The harness clone is
   never where app code lives.
 - **Upgrade**: when this template improves, nothing is merged or pulled into
   the app. Say *"Update my-app to the latest harness."* The installed
@@ -75,12 +96,12 @@ this repo (cloned once, per machine)             your app repo (its own repo, it
 - **Never**: don't fork this repo (shared history means every upgrade becomes
   a merge into your app code, and the harness's own run state collides with
   yours) and don't use GitHub's template feature (clean copy once, but NO
-  upgrade path ever — and it drags this repo's plans, history, and evidence
-  along). If an agent proposes either, that's a bug — the skills forbid it.
+  upgrade path ever, and it drags this repo's plans, history, and evidence
+  along). If an agent proposes either, that's a bug; the skills forbid it.
 
 Sentences are the whole interface: the skills route what you say to
 deterministic commands, and [Getting Started](docs/getting-started.md) lists
-those commands under every step — as the contract and the fallback, not as
+those commands under every step, as the contract and the fallback, not as
 something you type.
 
 ## The Lifecycle
@@ -95,7 +116,7 @@ something you type.
              (Claude)                     (+ surfaces)  (stages)          (Codex, attested)   (until clean)                  (ONE autoreview)     (ship gate)
 ```
 
-The read-only board (`./forge board`) renders that lifecycle live — committed
+The read-only board (`./forge board`) renders that lifecycle live. Committed
 artifacts become stories flowing across the stages, grouped by epic, with the
 gate rail and evidence a click away. Below, a real client project mid-delivery:
 
@@ -105,15 +126,15 @@ gate rail and evidence a click away. Below, a real client project mid-delivery:
   specs are saved and grilled as they emerge, then the roadmap is derived from
   the confirmed set. The prototype remains the permanent UX reference.
 - **After sign-off**: deterministic gates. Plans live in `plans/`, decisions in `docs/decisions/`, evidence in `.factory/`; the ship gate archives every shipped task's plan + proof to `plans/completed/` and `.factory/history/`.
-- **Continuously**: dump raw context (client emails, transcripts, notes) into `docs/context/` — dumping is free, tracking is automatic. Say *"process the context dump"* and an agent scans it into the ledger, harvests it into proposed decisions and BRIEF/architecture updates, and marks each file. You can't miss pending context: it greets every session start, tops every *"what now?"*, raises a daily `gardener` issue, and **blocks plan approval** until harvested or explicitly ignored. Dev corrections get mined into proposed skills that humans promote.
-- **The repo learns from itself**: review findings are structured and clustered across tasks — ask *"are we fixing the same thing again?"* and the agent shows which defect classes recur; the same class recurring 3+ times triggers a refactor story + invariant decision, never a fourth patch (decision 0005). Repeated failures become ledgered lessons that resurface before anyone touches the same paths again (decision 0006). Say *"this is out of scope for now"* and the parked scope keeps an explicit revisit trigger instead of vanishing.
+- **Continuously**: dump raw context (client emails, transcripts, notes) into `docs/context/`. Dumping is free, tracking is automatic. Say *"process the context dump"* and an agent scans it into the ledger, harvests it into proposed decisions and BRIEF/architecture updates, and marks each file. You can't miss pending context: it greets every session start, tops every *"what now?"*, raises a daily `gardener` issue, and **blocks plan approval** until harvested or explicitly ignored. Dev corrections get mined into proposed skills that humans promote.
+- **The repo learns from itself**: review findings are structured and clustered across tasks. Ask *"are we fixing the same thing again?"* and the agent shows which defect classes recur; the same class recurring 3+ times triggers a refactor story + invariant decision, never a fourth patch (decision 0005). Repeated failures become ledgered lessons that resurface before anyone touches the same paths again (decision 0006). Say *"this is out of scope for now"* and the parked scope keeps an explicit revisit trigger instead of vanishing.
 
-Phase ownership — which tool runs which phase — is declared in [`harness.yaml`](harness.yaml).
+Phase ownership, which tool runs which phase, is declared in [`harness.yaml`](harness.yaml).
 
 ## The Gates
 
 Every handoff is an artifact plus a deterministic gate. You never operate the
-gates — you ask for the next thing, and a skipped gate shows up as the agent
+gates. You ask for the next thing, and a skipped gate shows up as the agent
 relaying a refusal that names exactly what's missing. The "Enforced by"
 column describes that machinery. In lifecycle order:
 
@@ -124,42 +145,42 @@ column describes that machinery. In lifecycle order:
 | 3 | **Client sign-off** | an accepted `client-signoff` decision names a human, all specs are confirmed, and the roadmap covers them | `record_signoff.py`; every later phase checks the flag |
 | 4 | **Roster check** | assignees exist on `plans/team.json` (when a roster is defined) | `forge roadmap assign` |
 | 5 | **Planning lock** | product writes have an approved plan or a bounded, ledgered quickfix window | PreToolUse hook (decision 0013) |
-| 6 | **Rescue-only invocation** | always: raw `codex exec` is denied in every phase, no escape hatch — `/codex:rescue` is the runtime | PreToolUse hook |
-| 7 | **Plan grill** | the draft plan survives `/grill-me` vs the story's acceptance criteria + active decisions — same-issue, fresh, `pass` | `forge plan save` |
-| 8 | **Surface Impact** | the plan classifies every surface (runtime/API/data/CLI/UI/docs/tests) — Deferred and Unchanged-by-design rows carry reasons | `forge plan save` |
+| 6 | **Rescue-only invocation** | always: raw `codex exec` is denied in every phase, no escape hatch; `/codex:rescue` is the runtime | PreToolUse hook |
+| 7 | **Plan grill** | the draft plan survives `/grill-me` vs the story's acceptance criteria + active decisions: same-issue, fresh, `pass` | `forge plan save` |
+| 8 | **Surface Impact** | the plan classifies every surface (runtime/API/data/CLI/UI/docs/tests); Deferred and Unchanged-by-design rows carry reasons | `forge plan save` |
 | 9 | **Pending context** | every `docs/context/` dump is harvested or explicitly ignored (and scans REFUSE secrets/oversize files outright) | `forge plan save`; `context scan` |
 | 10 | **Schema + generator + skill attestation** | every evidence payload matches its `factory/schemas/` file: `generated_by` on the allowlist, mandatory design skills attested in `skills_used` on user-facing artifacts | every `record_*` script |
-| 11 | **Stage loop** | every decomposition stage ran its loop — order-enforced start, LOCAL autoreview until clean, commit, done | `forge stage start/done`; `pr_ready.py` refuses open stages (decision 0007) |
+| 11 | **Stage loop** | every decomposition stage ran its loop: order-enforced start, LOCAL autoreview until clean, commit, done | `forge stage start/done`; `pr_ready.py` refuses open stages (decision 0007) |
 | 12 | **Assumptions guided** | every `forge plan assume` row for the task is confirmed/promoted by the orchestrator (`fix-needed` keeps blocking) | `pr_ready.py` |
-| 13 | **Refactor ratchet** | a `kind: refactor` story shows non-positive net product-source line delta — refactors shrink or hold the line | `check_refactor_delta.py` in `pr_ready.py` |
-| 14 | **Frozen gates** | the vendored gate surface (scripts, schemas, prompts, hook config) matches `constitution/VENDOR_MANIFEST.json` — locally edited gates make every other gate's evidence unverifiable; re-vendor or upstream, never patch in place | `check_vendor_integrity.py` in `pr_ready.py` (warned at session start) |
-| 15 | **Ship gate** | approved plan, decomposition, verify OK, tests + 3 reviews ≥ 8 with no blockers, functional when `user_facing`, all evidence commit-stamped, same-commit, fresh | `pr_ready.py` — archives to `.factory/history/`, marks the roadmap item done |
+| 13 | **Refactor ratchet** | a `kind: refactor` story shows non-positive net product-source line delta; refactors shrink or hold the line | `check_refactor_delta.py` in `pr_ready.py` |
+| 14 | **Frozen gates** | the vendored gate surface (scripts, schemas, prompts, hook config) matches `constitution/VENDOR_MANIFEST.json`. Locally edited gates make every other gate's evidence unverifiable; re-vendor or upstream, never patch in place | `check_vendor_integrity.py` in `pr_ready.py` (warned at session start) |
+| 15 | **Ship gate** | approved plan, decomposition, verify OK, tests + 3 reviews ≥ 8 with no blockers, functional when `user_facing`, all evidence commit-stamped, same-commit, fresh | `pr_ready.py`, which archives to `.factory/history/` and marks the roadmap item done |
 | 16 | **Hygiene floor** | decision lifecycle intact (supersede links resolve, accepted records have substance), no prototype/ imports, schemas match harness.yaml, repo within size budgets | `check_dual_runtime.py` + `check_repo_budget.py` in CI |
 
-Advisory (surfaced, never blocking): recurring finding classes — *"are we
+Advisory (surfaced, never blocking): recurring finding classes, *"are we
 fixing the same thing again?"* (3+ hits of one class ⇒ consolidate via a
-refactor story, decision 0005); ledgered lessons — *"what did we learn about
-these files?"*; parked scope whose trigger fired — *"did any deferral come
-due?"*; and the loop-health audit — *"are the watchers themselves decaying?"*
+refactor story, decision 0005); ledgered lessons, *"what did we learn about
+these files?"*; parked scope whose trigger fired, *"did any deferral come
+due?"*; and the loop-health audit, *"are the watchers themselves decaying?"*
 (ignored escalations, stale deferrals, dead lessons: `forge audit`, run at
 every ship, surfaced by `forge next`, and run on pushes to `main` or manual
-dispatch by the `harness-health` workflow — which also opens an automated
+dispatch by the `harness-health` workflow, which also opens an automated
 `forge upgrade` PR when the vendored harness falls behind; merging it stays
 human).
 
-Human-only, always: **accepting a decision** (sign-off, epics, promotions) —
+Human-only, always: **accepting a decision** (sign-off, epics, promotions),
 the one command a person types themselves. The agent drafts the record,
 relays the accept command, and waits; it never runs it.
 
 ## Who Runs What (skills by stage)
 
-`harness.yaml` is the ALLOWLIST — these are the only pinned tools per stage,
+`harness.yaml` is the ALLOWLIST. These are the only pinned tools per stage,
 and recorders refuse evidence from anything else (`generated_by` is checked
 against `factory/schemas/`). Adopting a new tool = a PR here, never a local
 choice.
 
 **Devs only ever say the "You say" column.** The other columns are what the
-AGENT invokes and records in response — shown so you know what happens on
+AGENT invokes and records in response, shown so you know what happens on
 your behalf, not for you to type.
 
 | Stage | You say | Skill / agent invoked | Deterministic record |
@@ -169,28 +190,28 @@ your behalf, not for you to type.
 | existing repo | "Migrate this repo into the harness" | `knacklabs-migrate-project` skill → `./forge adopt` | vendored machinery; old context → `docs/context/` |
 | harness refresh | "Upgrade this repo to the latest harness" | `knacklabs-upgrade-project` skill → audit, upgrade, backfill, guided pending-story fill | reviewed and re-verified machinery upgrade |
 | repo hygiene | "Sanitise this repo" | `knacklabs-sanitise-project` skill → `forge sanitise` / `--check` on demand | safe fixes plus an explicit unresolved-items report |
-| any phase, lost | "What now?" | `/forge` skill → `./forge next` | — |
+| any phase, lost | "What now?" | `/forge` skill → `./forge next` | none |
 | 0a discovery | "Let's run office hours" | gstack `/office-hours` | `docs/product/DISCOVERY.md`, `BRIEF.md`; design docs + decisions in `.gstack/projects/` (in-repo via `.envrc`) |
 | 0b prototype | build freely; save/confirm specs as capabilities emerge | ponytail (lite) allowed | `prototype/` + `docs/specs/` |
 | 0c roadmap | "Derive the roadmap" | `docs-decomposer` | `./forge roadmap derive` → spec-linked `plans/roadmap.json` |
 | grills (every gate) | "Grill this spec" / "Grill the handover" / "Grill me on this plan" | `griller` contract; `/grill-me` satisfies the plan gate | digest-bound `.factory/grills/` records |
-| sign-off | "The client signed off" | none — human confirms `decision accept` (chat confirmation suffices; agent may run it with their name) | `record_signoff.py` → `run.json` |
+| sign-off | "The client signed off" | none; a human confirms `decision accept` (chat confirmation suffices; agent may run it with their name) | `record_signoff.py` → `run.json` |
 | workspace | "Scaffold the workspace" | Codex `/codex:rescue` + `SCAFFOLD_PROMPT.md` | nx workspace |
 | stories + distribution (PM/EM) | "Review the roadmap", "assign ENG-101 to alice" | `./forge roadmap list` / `assign` / `team set` | derived stories with spec links, criteria, and `@assignee` |
 | intake | "Start the next task on the roadmap" | `/forge` → `intake.py` | `.factory/run.json` |
-| plan | "Plan this task" | Claude PLAN MODE — forced by the hook (or Codex `planner-high`); exploration ONLY via `/codex:rescue --model gpt-5.6-terra --effort high`, read-only | grilled plan → `./forge plan save` → `plans/active/` |
+| plan | "Plan this task" | Claude PLAN MODE, forced by the hook (or Codex `planner-high`); exploration ONLY via `/codex:rescue --model gpt-5.6-terra --effort high`, read-only | grilled plan → `./forge plan save` → `plans/active/` |
 | decompose | "Decompose it" | `docs-decomposer` | `record_decomposition_from_json.py` (incl. `user_facing`) |
 | implement + test | "Implement it" / "work the next stage" | Codex `/codex:rescue --background` per stage (implementer writes the tests); `user_facing` tasks MUST use `emil-design-eng` + `frontend-design` (attested in `skills_used`, enforced by the recorder); each stage ends LOCAL autoreview → commit | `./forge stage start/done` → `.factory/stages.json`; `record_test_from_json.py --kind automated` |
-| lessons | "what did we learn about these files?" / "remember this" | none — deterministic ledger | `./forge lesson relevant` / `add` → `plans/lessons.jsonl` (schema-validated, deduped) |
-| verify | "Run verify" | none — deterministic script | `verify.py` → `.factory/verify.json` |
+| lessons | "what did we learn about these files?" / "remember this" | none; deterministic ledger | `./forge lesson relevant` / `add` → `plans/lessons.jsonl` (schema-validated, deduped) |
+| verify | "Run verify" | none; deterministic script | `verify.py` → `.factory/verify.json` |
 | review | "Review it" | **autoreview** (ONE Codex run, three lenses) | `record_review_from_json.py` ×3 |
 | functional check | only if `user_facing: true` | `functional-checker` subagent | `record_test_from_json.py --kind functional` |
-| ship | "Is this PR ready?" | none — deterministic gate (refuses unguided assumptions, missing/stale evidence) | `pr_ready.py` → archives + roadmap done |
-| guide assumptions (orchestrator) | "review the assumptions" | `./forge assumptions list --open` / `resolve` | `plans/assumptions.md` — ship gate reads it |
+| ship | "Is this PR ready?" | none; deterministic gate (refuses unguided assumptions, missing/stale evidence) | `pr_ready.py` → archives + roadmap done |
+| guide assumptions (orchestrator) | "review the assumptions" | `./forge assumptions list --open` / `resolve` | `plans/assumptions.md`; the ship gate reads it |
 | context dump | drop files in `docs/context/`, then "scan the context" | `/forge` → `./forge context scan` | `docs/context/ledger.json` |
 | context harvest | "Process the context dump" | agent per `harvester.md` → proposed decisions + BRIEF edits | `./forge context mark --harvested\|--ignored` |
 | retro / evolution | "Mine for skills" / "are we fixing the same thing again?" | agent per `skill-miner.md` (incl. lessons curation) + daily `gardener` workflow; `./forge findings patterns` flags recurring classes | proposals in `factory/skills/proposed/`; refactor stories (`kind: refactor`, delta-ratcheted) on the roadmap |
-| park scope | "this is out of scope for now" | none — deterministic ledger | `./forge defer add --why --trigger` → `plans/deferrals.md`; `forge next` surfaces open triggers |
+| park scope | "this is out of scope for now" | none; deterministic ledger | `./forge defer add --why --trigger` → `plans/deferrals.md`; `forge next` surfaces open triggers |
 
 ## Structure
 
@@ -201,21 +222,21 @@ symphony-forge/
 ├── .codex/                         # Codex adapter: config, hooks, agent registrations (thin)
 ├── .factory/                       # Run state + per-task history archive
 ├── .github/workflows/              # Scaffold checks, dual-runtime lint, daily gardener
-├── constitution/                   # KnackLabs engineering standards — THE single source of truth
+├── constitution/                   # KnackLabs engineering standards: THE single source of truth
 ├── docs/                           # Contracts, guides, decisions, context inbox
 ├── harness/nestjs-react/           # Scaffold prompt + stack conventions
 ├── harness.yaml                    # Phase ownership + skill precedence manifest
 ├── plans/                          # Task plans + durable ledgers: roadmap, assumptions, lessons, deferrals
 ├── AGENTS.md                       # The agent contract (both runtimes)
 ├── CLAUDE.md                       # Import shim: @AGENTS.md + @.claude/CLAUDE.md
-└── forge                           # The agents' entrypoint — devs speak; agents run ./forge <cmd>
+└── forge                           # The agents' entrypoint: devs speak; agents run ./forge <cmd>
 ```
 
 ## Why This Shape
 
 - **One canon, two runtimes.** Standards live once (`constitution/`, `AGENTS.md`, `harness.yaml`); `.claude/` and `.codex/` are thin adapters. `check_dual_runtime.py` fails CI on any duplication.
-- **Gates at phase transitions — plus exactly one keystroke gate.** Hooks are quiet by default; the deterministic gates (`record_signoff.py`, `record_*` recorders, `pr_ready.py`) do the enforcing. The one sanctioned exception (decision 0004): while a task is unplanned, the hook denies product-code edits and forces PLAN MODE. `/codex:rescue` is the only Codex invocation — raw `codex exec` is denied everywhere.
-- **Grill before every handoff.** Sign-off, epics, and every task plan pass an adversarial gaps-and-contradictions interrogation whose recorded verdict the gate checks — stale or blocked grills don't open doors.
+- **Gates at phase transitions, plus exactly one keystroke gate.** Hooks are quiet by default; the deterministic gates (`record_signoff.py`, `record_*` recorders, `pr_ready.py`) do the enforcing. The one sanctioned exception (decision 0004): while a task is unplanned, the hook denies product-code edits and forces PLAN MODE. `/codex:rescue` is the only Codex invocation; raw `codex exec` is denied everywhere.
+- **Grill before every handoff.** Sign-off, epics, and every task plan pass an adversarial gaps-and-contradictions interrogation whose recorded verdict the gate checks. Stale or blocked grills don't open doors.
 - **Evidence is attested, not asserted.** Every artifact carries `generated_by` (allowlist-checked) and `skills_used` (mandatory design skills enforced on user-facing work), stamped to the commit it attests.
 - **Decisions are exhaust, never forms.** Planning forces a Decisions section; harvesting turns raw context into records; humans confirm every `accepted`; replacements go through `--supersedes`, and accepted records must have substance.
 - **Garbage cannot become contract.** Secret/size guards at the inbox, repo budgets in CI, prototype-import ban, gstack noise gitignored, ledgers compacted, rejected proposals remembered.
@@ -224,12 +245,16 @@ symphony-forge/
 
 ## Docs
 
-- [Getting Started](docs/getting-started.md) — the blessed path, step by step
-- [Roles](docs/ROLES.md) — PM / EM / dev: artifacts, phrases, approvals, handoffs
-- [Workflow Contract](WORKFLOW.md) — phases, gates, grills, hygiene, evolution loop
+- [Getting Started](docs/getting-started.md): the blessed path, step by step
+- [Roles](docs/ROLES.md): PM / EM / dev artifacts, phrases, approvals, handoffs
+- [Workflow Contract](WORKFLOW.md): phases, gates, grills, hygiene, evolution loop
 - [Factory Contract](docs/FACTORY.md) · [Quality Contract](docs/QUALITY.md)
-- [Constitution](constitution/README.md) — engineering standards index
+- [Constitution](constitution/README.md): engineering standards index
 - [Harness Philosophy](docs/harness-philosophy.md) · [Validation Loop](docs/validation-loop.md)
 - [Product Brief](docs/product/README.md) · [Architecture](docs/architecture/README.md) · [Decisions](docs/decisions/README.md)
-- [Context Inbox](docs/context/README.md) — dump files here, harvest tracked
-- [Degraded Mode](docs/degraded-mode.md) — when codex-plugin-cc is unavailable
+- [Context Inbox](docs/context/README.md): dump files here, harvest tracked
+- [Degraded Mode](docs/degraded-mode.md): when codex-plugin-cc is unavailable
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
