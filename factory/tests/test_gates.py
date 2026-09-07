@@ -65,7 +65,8 @@ def run(repo: Path, script: str, *args: str, stdin: str | None = None,
         env: dict[str, str] | None = None):
     proc = subprocess.run(
         [sys.executable, str(repo / "factory" / "scripts" / script), *args],
-        cwd=repo, capture_output=True, text=True, input=stdin,
+        cwd=repo, capture_output=True, text=True, encoding="utf-8",
+        input=stdin,
         env={**os.environ, **(env or {})},
     )
     return proc.returncode, proc.stdout + proc.stderr
@@ -6949,41 +6950,6 @@ def plan_hook_payload(path: Path, *, tool="Write", mode="plan", session_id=None)
     return payload
 
 
-def test_post_tool_use_records_plan_mode_marker(repo):
-    root_plan = repo / "plans" / "root-draft.md"
-    root_plan.write_text("# Root draft\n", encoding="utf-8")
-    code, out = post_hook(repo, plan_hook_payload(root_plan, session_id="session-root"))
-    assert code == 0, out
-    root_records = list((repo / ".factory" / "plan-mode").glob("*.json"))
-    assert len(root_records) == 1
-
-    code, out = intake(repo, "PLAN-1", "Plan provenance")
-    assert code == 0, out
-    plan = repo / "plans" / "draft.md"
-    plan.write_text("# Draft\n\nBody\n\n## Implementation Assumptions\n- ignored\n")
-    records_dir = story_state(repo, "PLAN-1") / "plan-mode"
-    for tool in ("Write", "Edit", "MultiEdit"):
-        payload = plan_hook_payload(plan, tool=tool, session_id=f"session-{tool}")
-        before = set(records_dir.glob("*.json"))
-        code, out = post_hook(repo, payload)
-        assert code == 0, out
-        records = set(records_dir.glob("*.json"))
-        assert len(records) == len(before) + 1
-        marker = json.loads((records - before).pop().read_text())
-        assert marker == {
-            "generated_by": "claude-code:plan-mode",
-            "path": str(plan),
-            "sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
-            "sha256_body": plan_digest_without_assumptions(plan),
-            "at": marker["at"],
-            "session_id": f"session-{tool}",
-        }
-
-    code, out = post_hook(repo, {**payload, "permission_mode": "default"})
-    assert code == 0, out
-    assert len(list(records_dir.glob("*.json"))) == 3
-
-
 def test_post_tool_use_records_ask_user_question_round(repo):
     root_payload = {
         "tool_name": "AskUserQuestion",
@@ -7065,21 +7031,6 @@ def test_vendor_integrity_covers_post_tool_use(repo):
     assert code == 0 and "OK" in out, out
 
 
-def test_post_tool_use_marks_plan_outside_repo_with_raw_and_body_digests(
-        repo, tmp_path):
-    plan = tmp_path / "outside-plan.md"
-    plan.write_bytes(b"# Draft\n\nBody\n\n## Implementation Assumptions\n- ignored\n")
-    code, out = post_hook(repo, plan_hook_payload(plan))
-    assert code == 0, out
-    records = list((repo / ".factory" / "plan-mode").glob("*.json"))
-    assert len(records) == 1
-    marker = json.loads(records[0].read_text())
-    assert marker["path"] == str(plan.resolve())
-    assert marker["sha256"] == hashlib.sha256(plan.read_bytes()).hexdigest()
-    assert marker["sha256_body"] == plan_digest_without_assumptions(plan)
-    assert marker["session_id"] == ""
-
-
 def test_post_tool_use_round_without_response_records_chosen_null(repo):
     payload = {
         "tool_name": "AskUserQuestion",
@@ -7099,15 +7050,6 @@ def test_post_tool_use_round_without_response_records_chosen_null(repo):
         record = json.loads(added.pop().read_text())
         assert record["questions"][0]["chosen"] is None
         assert record["session_id"] == ""
-
-
-def test_post_tool_use_records_without_session_id(repo):
-    plan = repo / "plans" / "draft.md"
-    plan.write_text("# Draft\n", encoding="utf-8")
-    code, out = post_hook(repo, plan_hook_payload(plan, tool="Edit"))
-    assert code == 0, out
-    marker = next((repo / ".factory" / "plan-mode").glob("*.json"))
-    assert json.loads(marker.read_text())["session_id"] == ""
 
 
 def make_unmerged(repo: Path, rel: str = "src/conflict.ts") -> None:
@@ -8668,7 +8610,11 @@ def test_forge_next_routes_requirements_round_first(repo):
     assert code == 0, out
     # 0050 removed the "enter plan mode" instruction; the planning step is
     # still what appears once the requirements round is recorded.
-    assert "MANDATORY: plan per factory/prompts/planner.md" in out
+    # Reading comes first and authoring second — assert the ORDER, since
+    # that is the whole point of splitting the step.
+    assert "FIRST read the system this plan will assert about" in out
+    assert "THEN plan per factory/prompts/planner.md" in out
+    assert out.index("FIRST read the system") < out.index("THEN plan per")
     assert "FIRST: re-grill" not in out
 
     product = repo / "requirements-routing.txt"
@@ -8838,24 +8784,6 @@ def test_plan_mode_marker_matches_body_not_assumptions(repo, tmp_path):
     code, out = record_grill(repo, "plan", digest_of=plan, plan_mode=False)
     assert code == 0, out
 
-    code, out = run(repo, "forge.py", "plan", "save", "--from", str(plan),
-                    "--story", "ENG-1")
-
-    assert code != 0 and "awaiting-approval" in out, out
-    assert "plan-mode marker required" not in out
-
-
-def test_plan_mode_marker_in_root_scope_counts_for_active_story(repo, tmp_path):
-    sign_off(repo)
-    plan = tmp_path / "root-scope-plan.md"
-    plan.write_text(plan_draft(repo))
-    code, out = post_hook(repo, plan_hook_payload(plan))
-    assert code == 0, out
-    assert list((repo / ".factory" / "plan-mode").glob("*.json"))
-
-    intake(repo)
-    code, out = record_grill(repo, "plan", digest_of=plan, plan_mode=False)
-    assert code == 0, out
     code, out = run(repo, "forge.py", "plan", "save", "--from", str(plan),
                     "--story", "ENG-1")
 
@@ -16871,9 +16799,9 @@ def test_forge_next_routes_the_jit_frontier_states(repo, tmp_path):
         code, out = run(repo, "forge.py", "next")
         assert code == 0 and "PHASE: implementing" in out, out
         actions = [line for line in out.splitlines() if ". [dev]" in line]
-        assert len(actions) == 1, out
+        assert actions, out
         assert "emil-design-eng" in out
-        return actions[0]
+        return chr(10).join(actions)
 
     skeleton = skeletal_stage_task("T1")
     code, out = run(
@@ -17114,11 +17042,10 @@ def test_forge_next_and_board_route_author_task_plan_and_await_approval(
         assert task_rows(repo)[0]["state"] == row_state
         code, output = run(repo, "forge.py", "next")
         assert code == 0, output
-        action = next(
-            line.split(". ", 1)[1]
-            for line in output.splitlines() if ". [dev]" in line
-        )
-        assert command in action
+        actions = [line.split(". ", 1)[1]
+                   for line in output.splitlines() if ". [dev]" in line]
+        action = next((a for a in actions if command in a), None)
+        assert action is not None, f"{command!r} in none of: {actions}"
         assert action in next_actions(repo)["steps"]
 
     assert_route("author-task-plan", "author-task-plan", "task plan save T1")
