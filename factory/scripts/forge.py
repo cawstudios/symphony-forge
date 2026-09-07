@@ -651,8 +651,27 @@ def main() -> None:
              "(--gate spec/epics, and a --gate plan draft before it is saved)")
     p_gr.add_argument("--print-only", action="store_true",
                       help="compose and show the brief without releasing Codex")
+    p_gr.add_argument(
+        "--reread", default="",
+        help="read again after a cold read that has not been recorded: say "
+             "what changed SHAPE. One unconstrained read per pass is the "
+             "default because a second one returns a different frontier, not "
+             "a shorter one; verify an amendment with `grill confirm`")
     p_gr.add_argument("--repo")
     p_gr.set_defaults(func=grill_mod.cmd_grill_run)
+    p_gc = grill_sub.add_parser(
+        "confirm",
+        help="bounded re-read: does the amended artifact honour what the "
+             "human decided? Raises nothing new, so it terminates")
+    p_gc.add_argument("--gate", required=True, choices=gate_names())
+    p_gc.add_argument("--task", default="", help="task id for --gate task")
+    p_gc.add_argument(
+        "--file", default="",
+        help="the amended artifact, for gates that interrogate a CHOSEN one")
+    p_gc.add_argument("--print-only", action="store_true",
+                      help="compose and show the brief without releasing Codex")
+    p_gc.add_argument("--repo")
+    p_gc.set_defaults(func=grill_mod.cmd_grill_confirm)
     p_aud = sub.add_parser("audit",
                            help="loop-health: audit the improvement loops themselves (advisory)")
     p_aud.add_argument("--repo")

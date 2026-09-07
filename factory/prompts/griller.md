@@ -63,12 +63,48 @@ authored the plan, the independent cold-read pass is MANDATORY, not optional: on
 EVERY round release a fresh READ-ONLY Codex pass with
 `./forge grill run --gate <gate> [--task <id>]` that reads the plan/contract
 cold and returns findings — never a
-Claude sub-agent, never grill your own work inline — then carry ONLY those
+Claude sub-agent, never grill your own work inline — then carry ALL of those
 findings into your own AskUserQuestion rounds (the recorder rejects rounds not in
-the ledger, so the top-level session must still ask). Loop Codex grill → your
-AskUserQuestion rounds → answers → Codex grill again, until a round is clean AND
-the plan is stable; only then, approve exactly once. Read cold, as an adversary
-who did not write it. (EVERY gate is ledger-matched — signoff and epics no
+the ledger, so the top-level session must still ask). Read cold, as an adversary
+who did not write it.
+
+ONE COLD READ PER GATE — put every question to the human INSIDE it. The old
+shape was Codex grill → your rounds → amend → Codex grill AGAIN, looping until
+clean. That loop cannot converge: a fresh reader has no memory of what the last
+one found, so it returns a DIFFERENT frontier rather than a shorter one, and the
+artifact you amended to close round one becomes round two's input. Stories
+reached eleven, twenty-six and forty rounds that way; the last cost six hours.
+`forge grill run` now REFUSES a second unconstrained read on a gate that has
+already been read since its last recorded pass.
+
+So the sequence is:
+
+1. `./forge grill run --gate <gate>` — one unconstrained cold read.
+2. Put EVERY finding it returned to the human, in this grill, through
+   AskUserQuestion with your recommended answer first. Do not save the hard
+   ones for a later round; there is no later round.
+3. Amend the artifact ONCE, to what the human decided.
+4. `./forge grill confirm --gate <gate> [--task <id>]` — a bounded read that is
+   handed the findings, the answers and the amended artifact, and answers only
+   `HONOURED` / `NOT HONOURED` per finding. It may raise nothing new, which is
+   why it terminates. If an item comes back NOT HONOURED, fix that item and
+   confirm again — still bounded, still no new frontier.
+5. Record the gate, then approve exactly once.
+
+A cold read that comes back CLEAN skips steps 2–4 entirely: nothing was
+amended, so there is nothing to re-read. The recorder demands the confirm only
+for a `pass` that lists gaps or contradictions — because those mean the version
+being recorded is not the version anyone read.
+
+The price is stated plainly: a gap the single cold reader misses is not caught
+by a second reader at this gate. It surfaces at the next gate, or in review.
+That is the trade for ending a loop that was costing whole days.
+
+If the human's answers changed the artifact's SHAPE — a component dropped, a
+different approach chosen — a bounded confirm cannot judge the result. Say so
+and read again: `./forge grill run --gate <gate> --reread "<what changed
+shape>"`. It is a choice with a recorded reason, not a way around the rule, and
+the five-read cap still backstops it. (EVERY gate is ledger-matched — signoff and epics no
 longer excepted — so no gate can be recorded by a read-only Codex grill alone:
 the top-level session asks the round and records it.)
 
@@ -95,10 +131,12 @@ coordinator never has to guess whether to grill again or approve:
 - `NOT CONVERGED — <the specific reason: open gaps, a contradiction, or the plan
   changed after the last clean round>`
 
-Converged means BOTH: this round is clean AND the plan did not change after the
-round that made it clean. A clean round on a plan you have just edited is not
-convergence — it is an unreviewed edit. Only `CONVERGED` authorises asking the
-human for approval, and approval happens exactly once.
+`CONVERGED` on the cold read means there is nothing to amend: record and
+approve. `NOT CONVERGED` does NOT mean read again — it means put the findings
+to the human, amend once, and confirm. A clean read on a plan you have just
+edited is not convergence, it is an unreviewed edit; that is precisely what the
+bounded confirm exists to close, and why the recorder demands one for any pass
+that lists findings. Approval happens exactly once.
 
 Five gates, five scopes:
 
