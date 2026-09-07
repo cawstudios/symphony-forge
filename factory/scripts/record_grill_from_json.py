@@ -443,6 +443,101 @@ _gate = get_gate(args.gate)
 _validate_round_provenance(
     root, payload, args.gate, active_story, args.task or "",
 )
+
+
+def _require_confirm_of_the_amendment() -> None:
+    """A pass with findings needs the amendment independently re-read.
+
+    Findings mean the artifact was edited after the cold read, so the version
+    being recorded is NOT the version anyone read. Re-reading it cold is what
+    produced eleven, twenty-six and forty-round grills; the bounded confirm
+    proves the same thing without opening a new frontier.
+    """
+    if payload.get("verdict") != "pass":
+        return
+    if not (payload.get("gaps") or payload.get("contradictions")):
+        return  # nothing was found, so nothing was amended
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from forge_cli.grill import (
+        _artifact_digest, _artifact_text, _last_pass_at, _launch_rows,
+        confirm_receipt_path,
+    )
+
+    task_id = args.task or ""
+    remedy = (f"    ./forge grill confirm --gate {args.gate}"
+              + (f" --task {task_id}" if task_id else ""))
+    ledger_id = f"grill-{args.gate}" + (f"-{task_id}" if task_id else "")
+    try:
+        cold = _launch_rows(root, ledger_id,
+                            _last_pass_at(root, args.gate, task_id))
+    except (Exception, SystemExit):
+        # A ledger this cannot read must not refuse a grill. A missed confirm
+        # costs a bounded read; a false refusal costs the story.
+        return
+    if not cold:
+        # No stamped cold read to compare against, so "was this amended?" is
+        # unanswerable here. The cold-read requirement itself is enforced by
+        # `grill run`, not by guessing at record time.
+        return
+
+    read_digest = str(cold[-1].get("task_sha256") or "")
+    receipt = load_json(confirm_receipt_path(root, args.gate, task_id),
+                        default={})
+    if read_digest and not receipt:
+        # The cheap answer first: if the artifact is byte-identical to what was
+        # read, the findings were resolved without touching it, and there is
+        # nothing for a confirm to check.
+        try:
+            _, current = _artifact_text(root, args.gate, task_id,
+                                        str(args.input_digest or ""))
+            if _artifact_digest(current) == read_digest:
+                return
+        except (Exception, SystemExit):
+            pass
+    if not receipt:
+        raise SystemExit(
+            f"this {args.gate} grill records {len(payload.get('gaps') or [])} "
+            f"gap(s) and {len(payload.get('contradictions') or [])} "
+            "contradiction(s) as resolved, which means the artifact was "
+            "amended after the cold read -- so the version being recorded is "
+            "not the version anyone read.\n\n"
+            "  Do NOT cold-read it again; a second unconstrained read returns "
+            "a different frontier, not a shorter one. Verify the amendment "
+            "with the bounded read, which cannot raise anything new:\n"
+            f"{remedy}"
+        )
+
+    # The confirm must belong to THIS grill cycle. A receipt from an earlier
+    # cold read proves nothing about the findings being recorded now.
+    if receipt.get("cold_read_at") != str(cold[-1].get("at") or ""):
+        raise SystemExit(
+            f"the recorded {args.gate} confirm belongs to an earlier cold "
+            "read. The artifact has been read again since, so confirm the "
+            f"current findings:\n{remedy}")
+
+    # Resolve the artifact the way the CONFIRM resolved it. The plan gate
+    # normally grills an unsaved draft named by --file, so guessing here would
+    # read a different file and refuse a perfectly good grill.
+    file_arg = str(receipt.get("file_arg") or "") or str(args.input_digest or "")
+    try:
+        label, artifact = _artifact_text(root, args.gate, task_id, file_arg)
+    except SystemExit as exc:
+        # The locator's own message ("no plan draft given") is true but
+        # misleading here: the grill is fine, the confirmed file has moved.
+        raise SystemExit(
+            f"cannot re-read what the {args.gate} confirm was shown "
+            f"({file_arg or 'the recorded artifact'}): {exc}\n"
+            f"  Point at it and confirm again:\n{remedy} --file <artifact>"
+        ) from exc
+    if _artifact_digest(artifact) != receipt.get("artifact_sha256"):
+        raise SystemExit(
+            f"the {label} changed after it was confirmed, so this pass would "
+            "record a version no independent read has seen. Confirm the "
+            f"current one:\n{remedy}")
+
+
+_require_confirm_of_the_amendment()
 story = active_story if _gate.story_scoped else ""
 name = _gate.evidence_name(args.task or "")
 dest = evidence_path(root, story, name, for_write=True)

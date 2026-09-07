@@ -29,8 +29,8 @@ Read `AGENTS.md` first; it is the contract. Standards live in `constitution/`
 ## Ground rules
 - Session write lock always armed; plan authoring is mode-agnostic (0050) — never switch the session's mode to write a plan, and no mode unlocks product/canon: delegate
   writes, or during a companion outage `forge mode degraded start --reason`. Grill
-  (`/grill-me`) via a fresh read-only Codex `gpt-5.6-terra` @ xhigh cold-read every round (you authored it — never a Claude sub-agent, never inline) and WATCH that run; loop until clean AND stable; the plan then shows on the BOARD, the human reviews it THERE (not chat) and approves
-  EXACTLY ONCE — `./forge plan approve --by "<name>"` + re-save. Never approve before convergence, or twice.
+  (`/grill-me`) = ONE read-only Codex `gpt-5.6-terra` @ xhigh cold read (you authored it — never a Claude sub-agent, never inline), WATCHED. Put EVERY finding to the human in THAT grill (AskUserQuestion), amend once, then `./forge grill confirm --gate <gate>` — never cold-read twice: a second unconstrained read returns a DIFFERENT frontier, not a shorter one. The plan then shows on the BOARD, the human reviews it THERE (not chat) and approves
+  EXACTLY ONCE — `./forge plan approve --by "<name>"` + re-save. Never approve twice.
 - Decisions: `./forge decision new <slug>`; acceptance is HUMAN chat
   confirmation — then run accept/sign-off yourself, `--by "<name>"` + trailer.
 - Recording sign-off requires confirmed specs and their derived roadmap.

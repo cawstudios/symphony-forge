@@ -474,12 +474,18 @@ def cmd_next(args: argparse.Namespace) -> None:
                         "(ledgered, so a killed launcher still shows in `forge codex "
                         "status`; it pins the cold reader from harness.yaml) — not "
                         "a Claude sub-agent, never inline — and you MUST actively WATCH "
-                        "that Codex run (it can pause on a signal awaiting you). Carry "
-                        "its findings into your own AskUserQuestion rounds, fold in the "
-                        "human's answers, re-run the Codex grill, and LOOP until a round "
-                        "is clean AND the plan is stable (no further edits). Record the "
+                        "that Codex run (it can pause on a signal awaiting you). ONE "
+                        "cold read: put EVERY finding it returned to the human in THIS "
+                        "grill via AskUserQuestion (recommended answer first) — there "
+                        "is no later round to save the hard ones for. Amend the "
+                        "contract once to what they decided, then verify the amendment "
+                        f"with `./forge grill confirm --gate task --task {task_id}`, a "
+                        "bounded read that answers HONOURED / NOT HONOURED per finding "
+                        "and may raise nothing new. Do NOT cold-read again: a second "
+                        "unconstrained read returns a DIFFERENT frontier, not a shorter "
+                        "one, and that is how grills reached forty rounds. Record the "
                         "digest-bound pass. Only a clean grill makes the plan appear on "
-                        "the board. Do NOT ask for approval before the grill converges."
+                        "the board. Do NOT ask for approval before it is recorded."
                     )
                 elif frontier == "author-task-plan":
                     steps.append(
