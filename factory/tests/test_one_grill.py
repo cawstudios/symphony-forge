@@ -343,3 +343,89 @@ def test_exactly_one_codex_launch_is_ledgered_for_the_plan_gate(repo: Path):
     rows = [r for r in load_delegations(repo)
             if r.get("task") == "grill-plan"]
     assert len({r["launch_id"] for r in rows}) == 1
+
+
+# ------------------------------------------------- downstream of the plan gate
+
+
+def test_the_awaiting_copy_can_be_cold_read_after_the_draft_records(repo: Path):
+    """`plan save` writes a second file, and it carries its own grill.
+
+    The draft and the awaiting copy have different digests, so the awaiting
+    one needs its own recorded grill -- which needs its own cold read. If
+    recording the draft's pass did not release the next read, no plan could
+    ever reach approval.
+    """
+    _seed(repo)
+    lib = load_factory_lib(repo)
+    _cold_read(repo, at="2026-09-07T10:00:00+00:00")
+    try:
+        _refuse(repo)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the draft's read did not consume the gate")
+
+    record = lib.evidence_path(repo, "ENG-1", "grills/plan.json", for_write=True)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    lib.dump_json(record, {"verdict": "pass",
+                           "recorded_at": "2026-09-07T11:00:00+00:00"})
+    _refuse(repo)  # the awaiting copy may be read
+
+
+def test_a_stale_task_grill_can_be_re_read(repo: Path):
+    """Committing product code stales a task grill, and the loop re-grills.
+
+    That is the JIT contract loop working as designed, not a coordinator
+    grinding, so the rule must not stand in its way: a recorded pass releases
+    the next read.
+    """
+    _seed(repo)
+    lib = load_factory_lib(repo)
+    _cold_read(repo, gate="task", task_id="T1", at="2026-09-07T10:00:00+00:00")
+    record = lib.evidence_path(repo, "ENG-1", "grills/tasks/T1.json",
+                               for_write=True)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    lib.dump_json(record, {"verdict": "pass",
+                           "recorded_at": "2026-09-07T11:00:00+00:00"})
+    _refuse(repo, gate="task", task_id="T1")  # stale -> re-read is allowed
+
+    # And the re-read then consumes the gate again, so the loop cannot come
+    # back through the same door.
+    _cold_read(repo, gate="task", task_id="T1", at="2026-09-07T12:00:00+00:00")
+    try:
+        _refuse(repo, gate="task", task_id="T1")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the re-read did not consume the gate")
+
+
+def test_one_task_does_not_spend_another_task_read(repo: Path):
+    """Tasks in a story are ground through sequentially, one grill each."""
+    _seed(repo)
+    _cold_read(repo, gate="task", task_id="T1")
+    _refuse(repo, gate="task", task_id="T2")  # must not raise
+    _refuse(repo, gate="plan")                # nor the story plan
+
+
+def test_a_read_that_stales_before_recording_still_has_a_way_through(
+        repo: Path, capsys):
+    """The one case with no recorded pass to reset the count.
+
+    A doc commit between the cold read and the record stales the grill, so the
+    read cannot be recorded AND cannot be repeated. Without a stated way
+    through this would be the wall: nothing records, nothing proceeds.
+    """
+    _seed(repo)
+    _cold_read(repo)
+    try:
+        _refuse(repo)
+    except SystemExit:
+        message = capsys.readouterr().out
+    else:
+        raise AssertionError("expected the refusal")
+    assert "--reread" in message
+
+    # And it is a choice with a reason, not a flag that merely has to be present.
+    _refuse(repo, reread="a decision landed and re-scoped the plan")
