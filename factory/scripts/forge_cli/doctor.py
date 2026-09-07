@@ -1521,12 +1521,15 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             print(f"[fix ] mirroring {label} into ~/.codex/skills ...")
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(source, target, dirs_exist_ok=True)
-    # Both halves must be present for Codex: the trigger AND what it delegates to.
+    # `grilling` is what a reader actually loads, on either runtime. `grill-me`
+    # is the human's `/grill-me` alias and carries disable-model-invocation, so
+    # requiring its Codex mirror gated health on a file no model can use — a
+    # machine missing it was told to fix something irrelevant.
     grill_me_ok = ((grill_me / "SKILL.md").is_file()
-                   and (grill_me_codex / "SKILL.md").is_file()
+                   and (grilling / "SKILL.md").is_file()
                    and (grilling_codex / "SKILL.md").is_file())
     checks.append(_check(
-        "grill-me skill (both runtimes)",
+        "grilling skill (both runtimes)",
         grill_me_ok,
         "installed" if grill_me_ok else "not installed",
         "`npx -y skills add mattpocock/skills -g --copy --all`, then mirror BOTH "

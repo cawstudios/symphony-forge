@@ -385,11 +385,20 @@ def cmd_next(args: argparse.Namespace) -> None:
                 "record_grill_from_json.py --gate requirements"
             )
         else:
-            steps.append("[dev] MANDATORY: plan per factory/prompts/planner.md, or "
+            steps.append(
+                "[dev] FIRST read the system this plan will assert about — open "
+                "the types, enums, routes, permission codes and decision "
+                "records it will name. Not the architecture note describing "
+                "them: the file. Docs record the system as designed and drift "
+                "from what was built, and the cold reader checks what was "
+                "built. Delegate BREADTH to a read-only Codex run "
+                "(/codex:rescue) when the question is how a whole flow hangs "
+                "together; look up specific facts yourself.")
+            steps.append("[dev] THEN plan per factory/prompts/planner.md, or "
                          "deliberately open a bounded "
                          "`./forge quickfix start \"<reason>\"` window. Product writes are "
-                         "hook-blocked otherwise (Codex planning alternative: planner-high; "
-                         "exploration via /codex:rescue read-only). Authoring is "
+                         "hook-blocked otherwise (Codex planning alternative: "
+                         "planner-high). Authoring is "
                          "mode-agnostic (0050) — do not switch the session's mode "
                          "to write a plan.")
             steps.append("[dev] Record new decisions as you go: forge.py decision new <slug>")

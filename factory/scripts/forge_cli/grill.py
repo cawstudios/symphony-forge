@@ -40,12 +40,13 @@ def _artifact_text(base: Path, gate: str, task_id: str,
 def _grill_skill_section() -> str:
     """The grill technique, INLINED rather than named.
 
-    Naming it does not work for a Codex cold reader. What `doctor` installs
-    into ~/.codex/skills/grill-me is a 164-byte STUB whose whole body is "Call
-    the Skill tool with 'grilling'" — and `grilling`, the 2KB skill that holds
-    the actual technique, is installed only on the Claude side. So a Codex
-    reader told to load grill-me finds a pointer to a Skill tool its runtime
-    does not have, and falls back to the harness contract alone.
+    Naming a skill only works if the reader's runtime resolves it. `grill-me`
+    is a 164-byte STUB whose body is "Call the Skill tool with 'grilling'",
+    carrying `disable-model-invocation: true` — so no model invokes it, and a
+    reader told to would find a redirect it may not follow. `doctor` mirrors
+    the real `grilling` into ~/.codex/skills as well, so the technique IS
+    reachable there; inlining is the belt to that braces, for a machine where
+    `doctor --fix` has not run.
 
     `_skill_text` already looks in BOTH runtimes' skill directories, which is
     what lets the Claude-side text travel to Codex inside the brief. Prefer the
