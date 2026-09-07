@@ -47,16 +47,19 @@ def test_the_contract_tells_the_planner_to_read_first(repo: Path):
     claude = (HARNESS / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
     assert "do NOT grep/read app code yourself" not in claude, (
         "the prohibition is back")
+    # CLAUDE.md is capped at 40 lines by check_dual_runtime — it points, and
+    # planner.md carries the rule. Assert the pointer here and the substance
+    # there, or the cap and the test fight each other.
     assert "READ BEFORE YOU ASSERT" in claude
-    # Breadth still belongs to Codex — a summary is the right output there.
     assert "Delegate BREADTH" in claude
-    assert "A summary of a type is not the type" in claude
 
     planner = (HARNESS / "factory" / "prompts" / "planner.md").read_text(
         encoding="utf-8")
     assert "FIRST, READ THE SYSTEM YOU ARE PLANNING AGAINST" in planner
     # And it must say WHY docs are not enough, or it reads as a style note.
     assert "as designed" in planner and "what was built" in planner
+    # The distinction that makes delegation safe: breadth yes, facts no.
+    assert "a summary of a type is not the type" in planner.lower()
 
 
 def test_forge_next_makes_reading_a_step_not_a_parenthesis(repo: Path):
