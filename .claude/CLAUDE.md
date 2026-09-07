@@ -9,17 +9,7 @@ Read `AGENTS.md` first; it is the contract. Standards live in `constitution/`
 - Claude Code coordinates: discovery, planning, decisions, orchestration.
 - Codex executes: exploration, implementation, testing, AND the review — ONE
   three-lens pass PER TASK via `./forge review <id>`, WATCHED (Codex engine, never nested; records the task's proof — 0011/0049); loop fixes→re-review until clean, then pr-ready → PR → poll CI green. Never stop at review, and never turn a finding into a menu for the human (AGENTS.md "Review findings are not a menu").
-- READ BEFORE YOU ASSERT. Open the code you are about to write a rule about —
-  the type, the enum, the route, the decision record. A plan grounded in
-  `docs/architecture/**` describes the system as DESIGNED; the cold reader
-  checks the system as BUILT, and every gap between them is a finding you pay
-  for in rounds. Reading is not writing: the planning lock blocks writes, and
-  nothing blocks a read.
-- Delegate BREADTH, not facts: `/codex:rescue` read-only (`gpt-5.6-terra` @ high
-  to explore, `gpt-5.6-sol` @ xhigh to validate/debug; NEVER raw `codex exec`)
-  when the question is "how does this whole flow work", where a summary is the
-  right answer. A summary of a type is not the type — look that up yourself.
-- Never assert a code fact you have checked NEITHER way.
+- READ BEFORE YOU ASSERT (planner.md): open the type/enum/route/decision you write a rule about — docs record the design, the grill checks what was built. Delegate BREADTH only: `/codex:rescue` read-only, NEVER raw `codex exec`.
 
 ## codex-plugin-cc
 
