@@ -77,34 +77,29 @@ reached eleven, twenty-six and forty rounds that way; the last cost six hours.
 `forge grill run` now REFUSES a second unconstrained read on a gate that has
 already been read since its last recorded pass.
 
-So the sequence is:
+So the WHOLE grill is:
 
-1. `./forge grill run --gate <gate>` — one unconstrained cold read.
-2. Put EVERY finding it returned to the human, in this grill, through
-   AskUserQuestion with your recommended answer first. Do not save the hard
-   ones for a later round; there is no later round.
-3. Amend the artifact ONCE, to what the human decided.
-4. `./forge grill confirm --gate <gate> [--task <id>]` — a bounded read that is
-   handed the findings, the answers and the amended artifact, and answers only
-   `HONOURED` / `NOT HONOURED` per finding. It may raise nothing new, which is
-   why it terminates. If an item comes back NOT HONOURED, fix that item and
-   confirm again — still bounded, still no new frontier.
-5. Record the gate, then approve exactly once.
+1. `./forge grill run --gate <gate>` — one cold read. WATCH it.
+2. Clean? Record the pass and approve. Nothing else happens.
+3. Otherwise resolve every finding the REPOSITORY answers yourself — open the
+   file and settle it. Take to the human only what the repository cannot
+   answer: a decision nobody has made, a priority, a tradeoff between two
+   workable shapes. Put those through AskUserQuestion with your recommended
+   answer first, all of them, now. There is no later round to save the hard
+   ones for, and a finding is not a menu.
+4. Amend the artifact ONCE, to what they decided.
+5. Record the pass against the AMENDED version, then approve exactly once.
 
-A cold read that comes back CLEAN skips steps 2–4 entirely: nothing was
-amended, so there is nothing to re-read. The recorder demands the confirm only
-for a `pass` that lists gaps or contradictions — because those mean the version
-being recorded is not the version anyone read.
-
-The price is stated plainly: a gap the single cold reader misses is not caught
-by a second reader at this gate. It surfaces at the next gate, or in review.
-That is the trade for ending a loop that was costing whole days.
+The price is stated plainly, twice over: nothing independent re-reads the
+amended version, and a gap this reader misses is not caught by a second reader
+at this gate. Both surface at the next gate, or in review. That is the trade
+for ending a loop that was costing whole days.
 
 If the human's answers changed the artifact's SHAPE — a component dropped, a
-different approach chosen — a bounded confirm cannot judge the result. Say so
-and read again: `./forge grill run --gate <gate> --reread "<what changed
-shape>"`. It is a choice with a recorded reason, not a way around the rule, and
-the five-read cap still backstops it. (EVERY gate is ledger-matched — signoff and epics no
+different approach chosen — the amended artifact is not the one that was read
+in any useful sense. Say so and read again: `./forge grill run --gate <gate>
+--reread "<what changed shape>"`. It is a choice with a recorded reason, not a
+way around the rule, and the five-read cap still backstops it. (EVERY gate is ledger-matched — signoff and epics no
 longer excepted — so no gate can be recorded by a read-only Codex grill alone:
 the top-level session asks the round and records it.)
 
@@ -132,11 +127,9 @@ coordinator never has to guess whether to grill again or approve:
   changed after the last clean round>`
 
 `CONVERGED` on the cold read means there is nothing to amend: record and
-approve. `NOT CONVERGED` does NOT mean read again — it means put the findings
-to the human, amend once, and confirm. A clean read on a plan you have just
-edited is not convergence, it is an unreviewed edit; that is precisely what the
-bounded confirm exists to close, and why the recorder demands one for any pass
-that lists findings. Approval happens exactly once.
+approve. `NOT CONVERGED` does NOT mean read again — it means resolve what the
+repository answers, put the rest to the human, amend once, and record the pass
+against the amended version. Approval happens exactly once.
 
 Five gates, five scopes:
 

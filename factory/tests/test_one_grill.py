@@ -98,7 +98,7 @@ def test_the_first_cold_read_is_allowed(repo: Path):
     _refuse(repo)  # must not raise
 
 
-def test_a_second_cold_read_is_refused_and_names_the_confirm(repo: Path, capsys):
+def test_a_second_cold_read_is_refused_and_names_what_to_do_instead(repo: Path, capsys):
     _seed(repo)
     _cold_read(repo)
     try:
@@ -110,7 +110,7 @@ def test_a_second_cold_read_is_refused_and_names_the_confirm(repo: Path, capsys)
 
     # It must name the way forward, or it is a wall: the frontier is not
     # closed, so nothing records and nothing proceeds.
-    assert "grill confirm" in message
+    assert "record_grill_from_json.py" in message
     # And say WHY, or it reads as bureaucracy rather than the reason the
     # twenty-six-round grill happened.
     assert "different frontier" in message.lower()
@@ -172,72 +172,6 @@ def test_an_unreadable_ledger_never_refuses_a_grill(repo: Path):
 # ------------------------------------------------- the confirm is bounded
 
 
-def test_confirm_needs_a_cold_read_first(repo: Path):
-    _seed(repo)
-    code, out = run(repo, "forge.py", "grill", "confirm", "--gate", "plan",
-                    "--print-only")
-    assert code != 0
-    assert "has not been cold-read" in out
-
-
-def test_confirm_needs_an_answered_question(repo: Path):
-    """A clean read has nothing to confirm — that is the single-grill path."""
-    _seed(repo)
-    _cold_read(repo)
-    code, out = run(repo, "forge.py", "grill", "confirm", "--gate", "plan",
-                    "--print-only")
-    assert code != 0
-    assert "no question has been put to the human" in out
-
-
-def test_only_answers_given_after_the_cold_read_are_confirmed(repo: Path):
-    """Settled ground from an earlier gate is not this grill's findings.
-
-    Carrying it in would ask the reader to re-confirm decisions that were
-    never in question here, which is how a bounded read grows back into a
-    grill.
-    """
-    _seed(repo)
-    from forge_cli.grill import _answers_since  # noqa: E402
-    _answer(repo, "ENG-1", "Which store owns stock?", "SAP",
-            at="2026-09-07T09:00:00+00:00")
-    _answer(repo, "ENG-1", "Is the card printable?", "Yes",
-            at="2026-09-07T11:00:00+00:00")
-    after = _answers_since(repo, "2026-09-07T10:00:00+00:00")
-    assert [q for q, _ in after] == ["Is the card printable?"]
-
-
-def test_the_confirm_brief_forbids_new_findings(repo: Path):
-    """The whole reason a confirm terminates.
-
-    Given the griller contract instead, a reader hunts — and a hunting reader
-    returns a frontier, which restarts the loop.
-    """
-    from forge_cli.grill import _compose_confirm_brief  # noqa: E402
-    brief = _compose_confirm_brief(
-        repo, "plan", "the plan", "# Plan\nThe card is printable.",
-        [("Is the card printable?", "Yes")])
-    flat = " ".join(brief.split())
-
-    assert "Is the card printable?" in flat
-    assert "HUMAN'S ANSWER: Yes" in flat
-    assert "This is NOT a grill" in flat
-    assert "Do NOT raise anything else" in flat
-    # The verdict shape has to be per-finding, or the coordinator is back to
-    # interpreting prose.
-    assert "HONOURED" in flat and "NOT HONOURED" in flat
-    # The griller contract must NOT be in here — that is what makes it hunt.
-    assert "Hunt:" not in flat
-
-
-def test_the_confirm_brief_carries_the_amended_artifact(repo: Path):
-    from forge_cli.grill import _compose_confirm_brief  # noqa: E402
-    brief = _compose_confirm_brief(
-        repo, "plan", "the plan", "SENTINEL-ARTIFACT-BODY",
-        [("q", "a")])
-    assert "SENTINEL-ARTIFACT-BODY" in brief
-
-
 # ------------------------------------------- the recorder demands the confirm
 
 
@@ -259,71 +193,6 @@ def _grill_payload(gaps: list[str]) -> dict:
     }
 
 
-def test_a_clean_pass_needs_no_confirm(repo: Path, tmp_path: Path):
-    """No findings means nothing was amended, so nothing was left unread.
-
-    This is the single-grill path -- one cold read, record, approve -- and it
-    must stay free of ceremony, or the common case pays for the exception.
-    """
-    _seed(repo)
-    plan = repo / "plan.md"
-    plan.write_text("# Plan\n", encoding="utf-8")
-    _cold_read(repo)
-    payload = tmp_path / "grill.json"
-    payload.write_text(json.dumps(_grill_payload([])), encoding="utf-8")
-    _answer(repo, "ENG-1", "Any remaining gap before we hand off?", "No",
-            ["No", "Yes"])
-
-    code, out = run(repo, "record_grill_from_json.py", "--gate", "plan",
-                    "--input", str(payload), "--input-digest", str(plan))
-    assert code == 0, out
-
-
-def test_a_pass_with_findings_is_refused_without_a_confirm(repo: Path, tmp_path: Path):
-    _seed(repo)
-    gap = "the plan never says who owns stock"
-    payload = tmp_path / "grill.json"
-    payload.write_text(json.dumps(_grill_payload([gap])), encoding="utf-8")
-    plan = repo / "plan.md"
-    plan.write_text("# Plan\n", encoding="utf-8")
-    # Provenance runs first: every recorded round must exist in the ledger.
-    _answer(repo, "ENG-1", gap, "Fix it", ["Fix it", "Leave it"])
-    _answer(repo, "ENG-1", "Any remaining gap before we hand off?", "No",
-            ["No", "Yes"])
-    _cold_read(repo)
-
-    code, out = run(repo, "record_grill_from_json.py", "--gate", "plan",
-                    "--input", str(payload), "--input-digest", str(plan))
-    assert code != 0, out
-    assert "grill confirm" in out, out
-    # It must say WHY, or it reads as one more gate rather than the reason.
-    assert "not the version anyone read" in out, out
-
-
-def test_the_recorder_check_binds_to_the_confirmed_bytes(repo: Path):
-    """Ordering alone would let the artifact be amended AGAIN after confirming.
-
-    The receipt carries the digest of exactly what the bounded read was shown,
-    and the recorder re-resolves the artifact through the receipt's own
-    `--file` so a path difference can never cause a false refusal.
-    """
-    source = (HARNESS / "factory" / "scripts" / "record_grill_from_json.py"
-              ).read_text(encoding="utf-8")
-    flat = " ".join(source.split())
-    assert 'receipt.get("file_arg")' in flat
-    assert '_artifact_digest(artifact) != receipt.get("artifact_sha256")' in flat
-
-
-def test_the_confirm_receipt_round_trips(repo: Path):
-    from forge_cli.grill import confirm_receipt_path  # noqa: E402
-    _seed(repo)
-    path = confirm_receipt_path(repo, "plan", "")
-    assert path.name == "plan.json"
-    assert path.parent.name == "confirms"
-    # Task gates key by task, so two tasks cannot share one receipt.
-    assert confirm_receipt_path(repo, "task", "T1").name == "task-T1.json"
-
-
 # -------------------------------------------------------- the contracts agree
 
 
@@ -333,7 +202,9 @@ def test_the_griller_contract_no_longer_says_loop(repo: Path):
     flat = " ".join(text.split())
     assert "Codex grill again, until a round is clean" not in flat
     assert "ONE COLD READ PER GATE" in flat
-    assert "forge grill confirm" in flat
+    assert "the WHOLE grill" in flat
+    # Findings the repo answers are the coordinator's, not a menu for the human.
+    assert "resolve every finding the REPOSITORY answers yourself" in flat
     # The cost of one read has to be stated, not buried.
     assert "is not caught by a second reader at this gate" in flat
 
@@ -342,7 +213,7 @@ def test_the_adapter_no_longer_says_loop_until_clean(repo: Path):
     text = (HARNESS / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
     flat = " ".join(text.split())
     assert "loop until clean AND stable" not in flat
-    assert "grill confirm" in flat
+    assert "That is the WHOLE grill" in flat
     # check_dual_runtime caps this file; a rewrite that grew it would fail CI
     # somewhere far from here.
     assert len(text.splitlines()) <= 40
@@ -353,86 +224,11 @@ def test_forge_next_describes_one_read(repo: Path):
             ).read_text(encoding="utf-8")
     flat = " ".join(text.split())
     assert "LOOP until a round" not in flat
-    assert "grill confirm --gate task" in flat
-
-
-def test_no_confirm_when_the_artifact_never_moved(repo: Path, tmp_path: Path):
-    """A finding resolved WITHOUT touching the artifact costs no extra read.
-
-    The recorder already refuses a pass with unresolved findings, so a listed
-    gap can mean "the human confirmed what the plan already said". Charging a
-    Codex launch for that is the ceremony that gets routed around, and it is
-    avoidable: the cold read stamps the digest of what it was shown, so
-    "was this amended?" is answerable from mechanism rather than from the
-    coordinator's account.
-    """
-    _seed(repo)
-    gap = "the plan never says who owns stock"
-    plan = repo / "plan.md"
-    plan.write_text("# Plan\nSAP owns stock.\n", encoding="utf-8")
-
-    from forge_cli.grill import _artifact_digest, _artifact_text  # noqa: E402
-    _, artifact = _artifact_text(repo, "plan", "", str(plan))
-    _cold_read_with_digest(repo, _artifact_digest(artifact))
-
-    payload = tmp_path / "grill.json"
-    payload.write_text(json.dumps(_grill_payload([gap])), encoding="utf-8")
-    _answer(repo, "ENG-1", gap, "Fix it", ["Fix it", "Leave it"])
-    _answer(repo, "ENG-1", "Any remaining gap before we hand off?", "No",
-            ["No", "Yes"])
-
-    code, out = run(repo, "record_grill_from_json.py", "--gate", "plan",
-                    "--input", str(payload), "--input-digest", str(plan))
-    assert code == 0, out
-
-
-def test_an_amended_artifact_is_refused_even_with_the_same_findings(
-        repo: Path, tmp_path: Path):
-    """The byte check is what makes the shortcut above safe."""
-    _seed(repo)
-    gap = "the plan never says who owns stock"
-    plan = repo / "plan.md"
-    plan.write_text("# Plan\n", encoding="utf-8")
-
-    from forge_cli.grill import _artifact_digest, _artifact_text  # noqa: E402
-    _, artifact = _artifact_text(repo, "plan", "", str(plan))
-    _cold_read_with_digest(repo, _artifact_digest(artifact))
-    plan.write_text("# Plan\nSAP owns stock.\n", encoding="utf-8")  # amended
-
-    payload = tmp_path / "grill.json"
-    payload.write_text(json.dumps(_grill_payload([gap])), encoding="utf-8")
-    _answer(repo, "ENG-1", gap, "Fix it", ["Fix it", "Leave it"])
-    _answer(repo, "ENG-1", "Any remaining gap before we hand off?", "No",
-            ["No", "Yes"])
-
-    code, out = run(repo, "record_grill_from_json.py", "--gate", "plan",
-                    "--input", str(payload), "--input-digest", str(plan))
-    assert code != 0, out
-    assert "grill confirm" in out, out
-
-
-def test_findings_with_no_ledgered_cold_read_record_unchanged(
-        repo: Path, tmp_path: Path):
-    """Never refuse blind.
-
-    With no stamped cold read there is nothing to compare, so "was this
-    amended?" is unanswerable here. The cold-read requirement is enforced by
-    `grill run`; guessing at record time would refuse grills that predate this
-    mechanism entirely.
-    """
-    _seed(repo)
-    gap = "the plan never says who owns stock"
-    plan = repo / "plan.md"
-    plan.write_text("# Plan\n", encoding="utf-8")
-    payload = tmp_path / "grill.json"
-    payload.write_text(json.dumps(_grill_payload([gap])), encoding="utf-8")
-    _answer(repo, "ENG-1", gap, "Fix it", ["Fix it", "Leave it"])
-    _answer(repo, "ENG-1", "Any remaining gap before we hand off?", "No",
-            ["No", "Yes"])
-
-    code, out = run(repo, "record_grill_from_json.py", "--gate", "plan",
-                    "--input", str(payload), "--input-digest", str(plan))
-    assert code == 0, out
+    # Assert within ONE source line: the step is a concatenation of string
+    # literals, so a phrase spanning two of them carries quotes in the source
+    # that collapsing whitespace never removes.
+    assert "cold read is the WHOLE grill" in flat
+    assert "resolve every finding the REPO answers yourself" in flat
 
 
 # ------------------------------------------------------ the whole way through
@@ -440,35 +236,40 @@ def test_findings_with_no_ledgered_cold_read_record_unchanged(
 
 def test_a_plan_still_saves_and_approves_through_the_new_flow(
         repo: Path, tmp_path: Path):
-    """draft -> one cold read -> answers -> amend -> confirm -> record -> save.
+    """draft -> ONE cold read -> resolve the findings -> amend -> save.
 
-    The gates bind the recorded grill to the plan's digest, so this is the
-    sequence that would break first if the confirm requirement were wrong: a
-    grill that cannot be recorded is a plan that can never be saved.
+    Every other test here checks one gate in isolation. The question that
+    matters is whether the sequence a dev actually performs still ends with an
+    approved plan on disk, because the gates bind the recorded grill to the
+    plan's digest: a grill that cannot be recorded is a plan that can never be
+    saved. That is what would break first if the one-read rule were wrong.
+
+    The Codex process cannot run in a test, so the row `grill run` leaves in
+    the ledger is written the way the launcher writes it. Everything after it
+    is the real harness: the real recorder, the real digest binding, the real
+    `plan save` and `plan approve`.
     """
     from test_gates import (  # noqa: E402
-        ensure_story, intake, log_grill_rounds, plan_draft, record_grill,
-        run_state, sign_off,
+        PLAN_BODY, ensure_story, intake, log_grill_rounds, plan_draft,
+        record_grill, run_state, sign_off,
     )
-    from forge_cli.grill import (  # noqa: E402
-        _artifact_digest, _artifact_text, confirm_receipt_path,
-    )
+    from forge_cli.grill import _artifact_digest, _artifact_text  # noqa: E402
 
     sign_off(repo)
     intake(repo)
     ensure_story(repo, "ENG-1", "Invoices")
 
-    # 1. The dev drafts a plan.
+    # 1. The dev reads the repo and drafts a plan.
     draft = tmp_path / "plan.md"
     draft.write_text(plan_draft(repo), encoding="utf-8")
 
     # 2. ONE cold read, stamping the bytes it was shown -- what `grill run`
     #    records through the ledgered launcher.
     _, read_bytes = _artifact_text(repo, "plan", "", str(draft))
-    cold_at = "2026-09-07T10:00:00+00:00"
-    _cold_read_with_digest(repo, _artifact_digest(read_bytes), at=cold_at)
+    _cold_read_with_digest(repo, _artifact_digest(read_bytes),
+                           at="2026-09-07T10:00:00+00:00")
 
-    # 3. A second cold read is now refused, and names the way forward.
+    # 3. A second cold read is refused. This is the whole mechanism.
     try:
         _refuse(repo)
     except SystemExit:
@@ -476,7 +277,8 @@ def test_a_plan_still_saves_and_approves_through_the_new_flow(
     else:
         raise AssertionError("a second cold read was allowed")
 
-    # 4. Its findings go to the human INSIDE this grill.
+    # 4. Its findings are settled -- in the repo where the repo answers, with
+    #    the human where it does not.
     gap = "the plan never says which service owns invoice numbering"
     rounds = [
         {"question": gap, "options": ["Ledger owns it", "Billing owns it"],
@@ -487,47 +289,26 @@ def test_a_plan_still_saves_and_approves_through_the_new_flow(
     code, out = log_grill_rounds(repo, rounds)
     assert code == 0, out
 
-    # 5. The plan is amended ONCE, to what the human decided.
-    from test_gates import PLAN_BODY  # noqa: E402
+    # 5. The plan is amended ONCE, and the pass records against the AMENDED
+    #    version -- no second Codex run anywhere in here.
     draft.write_text(
         plan_draft(repo, body=PLAN_BODY
                    + "\nThe ledger service owns invoice numbering.\n"),
         encoding="utf-8")
-
-    # 6. The bounded confirm re-reads the amendment -- what `grill confirm`
-    #    leaves behind after its launch.
-    _, amended = _artifact_text(repo, "plan", "", str(draft))
-    receipt = confirm_receipt_path(repo, "plan", "")
-    receipt.parent.mkdir(parents=True, exist_ok=True)
-    load_factory_lib(repo).dump_json(receipt, {
-        "gate": "plan", "task_id": "", "at": "2026-09-07T12:00:00+00:00",
-        "cold_read_at": cold_at, "file_arg": str(draft),
-        "artifact_sha256": _artifact_digest(amended),
-        "questions_confirmed": len(rounds),
-    })
-
-    # 7. The grill records -- findings and all.
     code, out = record_grill(
         repo, "plan", digest_of=draft, rounds=rounds, gaps=[gap],
         resolutions=["The ledger service owns invoice numbering."],
         citations=[{"finding": gap, "source": "docs/architecture/"}])
     assert code == 0, out
 
-    # 8. And the plan saves, then approves, then saves as approved.
+    # 6. And it saves, then approves.
     code, out = run(repo, "forge.py", "plan", "save", "--from", str(draft),
                     "--story", "ENG-1")
     assert code != 0 and "awaiting-approval" in out, out
 
     active = next((repo / "plans" / "active").glob("ENG-1-*.md"))
-    # The awaiting copy is a different file, so it needs its own grill --
-    # unchanged by this PR, and the confirm must follow the bytes.
-    _, awaiting = _artifact_text(repo, "plan", "", str(active))
-    load_factory_lib(repo).dump_json(receipt, {
-        "gate": "plan", "task_id": "", "at": "2026-09-07T12:30:00+00:00",
-        "cold_read_at": cold_at, "file_arg": str(active),
-        "artifact_sha256": _artifact_digest(awaiting),
-        "questions_confirmed": len(rounds),
-    })
+    # The awaiting copy is a different file with its own digest, so it carries
+    # its own grill. Unchanged by this PR, and still no extra Codex run.
     code, out = log_grill_rounds(repo, rounds)
     assert code == 0, out
     code, out = record_grill(
@@ -542,3 +323,23 @@ def test_a_plan_still_saves_and_approves_through_the_new_flow(
                     "--story", "ENG-1")
     assert code == 0, out
     assert run_state(repo)["plan_status"] == "approved"
+
+
+def test_exactly_one_codex_launch_is_ledgered_for_the_plan_gate(repo: Path):
+    """The count is the point of the whole change.
+
+    Grilling used to cost a launch per round -- eleven, twenty-six, forty. The
+    ledger is what those launches were counted from, so it is what proves the
+    new shape: one row for the plan gate, and the second attempt refused before
+    a brief is even composed.
+    """
+    from forge_cli.delegate import load_delegations  # noqa: E402
+    _seed(repo)
+    _cold_read(repo)
+    try:
+        _refuse(repo)
+    except SystemExit:
+        pass
+    rows = [r for r in load_delegations(repo)
+            if r.get("task") == "grill-plan"]
+    assert len({r["launch_id"] for r in rows}) == 1

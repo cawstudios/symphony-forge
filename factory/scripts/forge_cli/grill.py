@@ -321,17 +321,6 @@ def _last_pass_at(base: Path, gate: str, task_id: str) -> str:
     return str(record.get("recorded_at") or "")
 
 
-def confirm_receipt_path(base: Path, gate: str, task_id: str) -> Path:
-    """Where the bounded confirm records which bytes it was shown."""
-    from factory_lib import evidence_path, load_json, run_state_path
-    from grill_gates import get_gate
-    story = load_json(run_state_path(base), default={}).get("issue_key", "")
-    name = f"grills/confirms/{gate}" + (f"-{task_id}" if task_id else "") + ".json"
-    return evidence_path(
-        base, story if get_gate(gate).story_scoped else "", name,
-        for_write=True)
-
-
 def _refuse_a_second_cold_read(base: Path, ledger_id: str, gate: str,
                                task_id: str, reread: str) -> None:
     """One unconstrained cold read per recorded pass.
@@ -339,12 +328,14 @@ def _refuse_a_second_cold_read(base: Path, ledger_id: str, gate: str,
     The second read is the one that diverges: it has no memory of what the
     first found, so it returns a different frontier and the grill never ends.
     Amending the artifact is exactly when a second read feels necessary and
-    exactly when it is wrong -- that is what `grill confirm` is for.
+    exactly when it is wrong: the amendment answers the findings, so a reader
+    that never saw them will not check it, it will look for new ones.
 
-    This is not a wall. A reread is available as a CHOICE with a reason, for
-    when the human's answers changed the artifact's SHAPE rather than its
-    details and a bounded confirm genuinely cannot judge it; the reason is
-    ledgered, and the five-read cap still backstops it.
+    This is not a wall. The findings go to the human, the artifact is amended
+    once, and the pass is recorded against the AMENDED version -- one read,
+    then save. A reread stays available as a CHOICE with a reason, for when
+    the answers changed the artifact's SHAPE rather than its details; the
+    reason is ledgered, and the five-read cap still backstops it.
     """
     if reread:
         return
@@ -366,184 +357,18 @@ def _refuse_a_second_cold_read(base: Path, ledger_id: str, gate: str,
         "frontier, and the artifact you amended to close round one becomes "
         "round two's input. Stories that kept re-reading reached eleven, "
         "twenty-six and forty rounds.\n\n"
-        "  Put the findings to the human NOW, in this grill, amend the "
-        "artifact once, then verify the amendment with a bounded read that "
-        "cannot open new questions:\n"
-        f"    ./forge grill confirm --gate {gate}"
-        f"{' --task ' + task_id if task_id else ''}\n\n"
-        "  If their answers changed the artifact's SHAPE and no bounded check "
-        "can judge it, say so and read again:\n"
+        "  One read is the whole grill. Put its findings to the human NOW, "
+        "amend the artifact to what they decided, and record the pass against "
+        "the amended version:\n"
+        "    python3 factory/scripts/record_grill_from_json.py "
+        f"--gate {gate}"
+        f"{' --task ' + task_id if task_id else ''} --input <json>\n\n"
+        "  If their answers changed the artifact's SHAPE rather than its "
+        "details, say so and read again:\n"
         f"    ./forge grill run --gate {gate}"
         f"{' --task ' + task_id if task_id else ''} "
         "--reread \"<what changed shape>\""
     )
-
-
-def _answers_since(base: Path, when: str) -> list[tuple[str, str]]:
-    """Questions put to the human after `when`, with the answer chosen.
-
-    From the AskUserQuestion ledger the recorder validates against -- not from
-    a summary written by the party whose work is being checked.
-    """
-    from factory_lib import evidence_path, load_json, run_state_path
-    story = load_json(run_state_path(base), default={}).get("issue_key", "")
-    directories = [d for d in (
-        evidence_path(base, story, "grill-rounds"),
-        evidence_path(base, None, "grill-rounds"),
-    ) if d.is_dir()]
-    seen: set[tuple[str, str]] = set()
-    answered: list[tuple[str, str, str]] = []
-    for directory in dict.fromkeys(directories):
-        for path in sorted(directory.glob("*.json")):
-            try:
-                record = load_json(path, default={})
-            except Exception:
-                continue
-            if not isinstance(record, dict):
-                continue
-            at = str(record.get("at") or "")
-            if at <= when:
-                continue  # settled before this grill; not this grill's findings
-            for entry in record.get("questions", []):
-                if not isinstance(entry, dict):
-                    continue
-                question = str(entry.get("question") or "").strip()
-                chosen = str(entry.get("chosen") or "").strip()
-                if not question or not chosen:
-                    continue
-                if (question, chosen) in seen:
-                    continue
-                seen.add((question, chosen))
-                answered.append((at, question, chosen))
-    answered.sort(key=lambda row: row[0])
-    return [(q, a) for _, q, a in answered]
-
-
-def _compose_confirm_brief(base: Path, gate: str, label: str, artifact: str,
-                           answers: list[tuple[str, str]]) -> str:
-    """A read that can only answer the questions it was given.
-
-    Deliberately NOT the griller contract. The griller contract tells a reader
-    to hunt, and a hunting reader finds a new frontier -- which is the loop
-    this replaces. This reader gets the findings, the human's answers and the
-    amended artifact, and has exactly one job per finding.
-    """
-    numbered = "\n".join(
-        f"{index}. Q: {question}\n   HUMAN'S ANSWER: {chosen}"
-        for index, (question, chosen) in enumerate(answers, start=1))
-    return "\n".join([
-        f"# Bounded confirm read -- gate: {gate} -- {label}",
-        "",
-        "You did NOT write what follows and you are READ-ONLY.",
-        "",
-        "This is NOT a grill. The artifact was cold-read once already; its "
-        "findings were put to the human and answered, and the artifact was "
-        "then amended. Your only job is to say whether the amendment actually "
-        "honours each answer.",
-        "",
-        "## The findings, and what the human decided",
-        "",
-        numbered,
-        "",
-        f"## The amended artifact ({label})",
-        "",
-        artifact,
-        "",
-        "## What to return -- and ONLY this",
-        "",
-        "One line per numbered item above, in order:",
-        "",
-        "    <n>. HONOURED -- <where in the artifact, quoted>",
-        "    <n>. NOT HONOURED -- <what the artifact says instead>",
-        "",
-        "Then one final line: `CONFIRMED` if every item is honoured, or "
-        "`NOT CONFIRMED -- items <n,...>` otherwise.",
-        "",
-        "Do NOT raise anything else. Not a gap, not a better shape, not a "
-        "contradiction you notice in passing, however real. A confirm that "
-        "opens new questions restarts the loop this exists to end -- anything "
-        "you spot outside these items belongs to the NEXT gate, or to the "
-        "review, and saying it here costs the story hours. If an answer is "
-        "honoured by text that is itself wrong, still mark it HONOURED and say "
-        "so in the same line.",
-        "",
-    ])
-
-
-def cmd_grill_confirm(args: argparse.Namespace) -> None:
-    """Verify the amendment, without re-opening the frontier."""
-    from .delegate import launch_companion, mode_run_config
-
-    base = Path(args.repo).resolve() if args.repo else repo_root()
-    gate = args.gate
-    task_id = (args.task or "").strip()
-    ledger_id = f"grill-{gate}" + (f"-{task_id}" if task_id else "")
-
-    since = _last_pass_at(base, gate, task_id)
-    cold = _launch_rows(base, ledger_id, since)
-    if not cold:
-        fail(f"nothing to confirm: --gate {gate} has not been cold-read since "
-             f"its last recorded pass.\n"
-             f"  Read it first: ./forge grill run --gate {gate}"
-             f"{' --task ' + task_id if task_id else ''}")
-    cold_read_at = str(cold[-1].get("at") or "")
-
-    answers = _answers_since(base, cold_read_at)
-    if not answers:
-        fail(
-            "nothing to confirm: no question has been put to the human since "
-            f"the --gate {gate} cold read.\n\n"
-            "  A confirm checks that the AMENDED artifact honours what the "
-            "human decided. If the cold read came back clean, there is nothing "
-            "to amend and nothing to confirm -- record the pass. If it found "
-            "something, put it to the human first (AskUserQuestion, which is "
-            "the ledger the recorder reads), amend, then confirm.")
-
-    label, artifact = _artifact_text(
-        base, gate, task_id, (getattr(args, "file", "") or "").strip())
-    text = _compose_confirm_brief(base, gate, label, artifact, answers)
-    path = base / ".factory" / f"grill-confirm-{gate}" \
-        f"{'-' + task_id if task_id else ''}.md"
-    model, effort, _bound = mode_run_config(base, "grill")
-
-    launch_companion(
-        base,
-        task_id=f"confirm-{gate}" + (f"-{task_id}" if task_id else ""),
-        text=text,
-        path=path,
-        # The digest of the exact bytes confirmed. The recorder requires this
-        # to equal the artifact it is being asked to record a pass for, so a
-        # confirm of version B can never certify version C.
-        task_sha256_value=_artifact_digest(artifact),
-        model=model,
-        effort=effort,
-        write=False,
-        story=load_json(run_state_path(base), default={}).get("issue_key", ""),
-        print_only=bool(args.print_only),
-    )
-    if args.print_only:
-        return
-
-    from factory_lib import dump_json, now_iso
-    receipt = confirm_receipt_path(base, gate, task_id)
-    receipt.parent.mkdir(parents=True, exist_ok=True)
-    dump_json(receipt, {
-        "gate": gate,
-        "task_id": task_id,
-        "at": now_iso(),
-        "cold_read_at": cold_read_at,
-        # The `--file` this was resolved from, so the recorder resolves the
-        # artifact identically instead of guessing and refusing a good grill.
-        "file_arg": (getattr(args, "file", "") or "").strip(),
-        "artifact_sha256": _artifact_digest(artifact),
-        "questions_confirmed": len(answers),
-    })
-
-    print(f"NEXT: if every item came back HONOURED, record the gate with "
-          f"`python3 factory/scripts/record_grill_from_json.py --gate {gate}"
-          f"{' --task ' + task_id if task_id else ''} --input <json>`. If not, "
-          f"fix the named items and confirm again -- a confirm never opens new "
-          f"questions, so this terminates.")
 
 
 def cmd_grill_run(args: argparse.Namespace) -> None:
@@ -588,8 +413,9 @@ def cmd_grill_run(args: argparse.Namespace) -> None:
     print(
         "NEXT: put EVERY finding to the human in THIS grill "
         "(AskUserQuestion -- the ledger the recorder reads), amend the "
-        "artifact once, then verify the amendment with\n"
-        f"  ./forge grill confirm --gate {gate}"
-        f"{' --task ' + task_id if task_id else ''}\n"
-        "Do not cold-read again: a second read returns a different frontier, "
-        "not a shorter one.")
+        "artifact to what they decided, then record the pass:\n"
+        "  python3 factory/scripts/record_grill_from_json.py "
+        f"--gate {gate}"
+        f"{' --task ' + task_id if task_id else ''} --input <json>\n"
+        "This is the whole grill. Do not cold-read again: a second read "
+        "returns a different frontier, not a shorter one.")

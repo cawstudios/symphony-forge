@@ -173,10 +173,10 @@ def test_an_uncountable_ledger_never_refuses(repo: Path):
 def test_the_cap_is_enforced_by_the_command(repo: Path):
     # The unit is worthless if cmd_grill_run never calls it.
     #
-    # Scoped to cmd_grill_run's own body. Searching the whole module took the
-    # FIRST match, so a later function resolving the same artifact the same way
-    # (`cmd_grill_confirm`) captured it and this reported a reversed order
-    # inside a function it had never looked at.
+    # Scoped to cmd_grill_run's own body. Searching the whole module takes the
+    # FIRST match, so any other function resolving the same artifact the same
+    # way captures it and this reports a reversed order inside a function it
+    # never looked at -- which is exactly what happened once already.
     source = (HARNESS / "factory" / "scripts" / "forge_cli" / "grill.py"
               ).read_text(encoding="utf-8")
     body = source[source.index("def cmd_grill_run("):]
