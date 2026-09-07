@@ -24,6 +24,8 @@ from pathlib import Path
 from factory_lib import load_json, repo_root, run_state_path
 from grill_gates import FLOOR_IS_NOT_A_TARGET, get_gate
 
+from .common import fail
+
 def _artifact_text(base: Path, gate: str, task_id: str,
                    file_arg: str = "") -> tuple[str, str]:
     """Ask the gate table where this gate's artifact lives.
@@ -219,20 +221,91 @@ def _compose_brief(base: Path, gate: str, label: str, artifact: str,
     ])
 
 
+# Five cold reads without a recordable pass means the grill is no longer
+# converging on the artifact. Rounds past this bought nothing on every story
+# that reached them — one ran to eleven and asked for help, one to twenty-six,
+# one to forty over six hours.
+ROUNDS_BEFORE_ESCALATING = 5
+
+
+def _rounds_since_last_pass(base: Path, ledger_id: str, gate: str,
+                            task_id: str) -> int:
+    """Cold reads released for this gate since its last recorded pass.
+
+    From the delegation ledger, which carries a row per launch with its pid —
+    a count of runs that actually happened. Distinct launch ids, because one
+    launch appends several rows as it starts, runs and finishes.
+    """
+    try:
+        from factory_lib import (
+            evidence_path, load_json, run_state_path,
+        )
+        from .delegate import load_delegations
+        from grill_gates import get_gate
+
+        story = load_json(run_state_path(base), default={}).get("issue_key", "")
+        record = load_json(
+            evidence_path(base, story if get_gate(gate).story_scoped else "",
+                          get_gate(gate).evidence_name(task_id)), default={})
+        since = str(record.get("recorded_at") or "")
+        launches = {
+            row.get("launch_id") for row in load_delegations(base)
+            if row.get("task") == ledger_id
+            and row.get("launch_id")
+            and str(row.get("at") or "") > since
+        }
+        return len(launches)
+    except (Exception, SystemExit):
+        # SystemExit is NOT an Exception: load_delegations calls fail() on a
+        # malformed ledger. Never let the counter refuse a grill it cannot
+        # count — a missed cap costs a round, a false cap costs the story.
+        return 0
+
+
+def _refuse_past_the_cap(base: Path, ledger_id: str, gate: str,
+                         task_id: str) -> None:
+    rounds = _rounds_since_last_pass(base, ledger_id, gate, task_id)
+    if rounds < ROUNDS_BEFORE_ESCALATING:
+        return
+    try:
+        from forge_cli.signal import open_escalation
+        if open_escalation(base):
+            return  # the human has been brought in; carry on
+    except (Exception, SystemExit):
+        return
+
+    fail(
+        f"{rounds} cold reads on --gate {gate} without a recorded pass.\n\n"
+        "  This is no longer a grilling problem. Past a handful of rounds the "
+        "reader has stopped converging on the artifact and started circling "
+        "something nobody has decided, and another round cannot settle that — "
+        "stories that kept going reached eleven, twenty-six and forty rounds, "
+        "the last costing six hours.\n\n"
+        "  Take the open findings to the human, say what you recommend, and "
+        "record what they decide:\n"
+        "    ./forge signal escalate --missing-decision \"<what nobody has "
+        "decided>\" --checked \"contract,plan,constitution,decisions,lessons\"\n"
+        "  Grilling continues after that. Recording a pass resets the count."
+    )
+
+
 def cmd_grill_run(args: argparse.Namespace) -> None:
     from .delegate import launch_companion, mode_run_config
 
     base = Path(args.repo).resolve() if args.repo else repo_root()
     gate = args.gate
     task_id = (args.task or "").strip()
-    label, artifact = _artifact_text(
-        base, gate, task_id, (getattr(args, "file", "") or "").strip())
-    text = _compose_brief(base, gate, label, artifact, task_id)
-
     # Keyed apart from real task ids so a grill row can never be mistaken for
     # a task's delegation, and so concurrent grills of different gates do not
     # collide in the ledger.
     ledger_id = f"grill-{gate}" + (f"-{task_id}" if task_id else "")
+    # Before composing anything: a capped run should not pay for a brief, and
+    # a missing artifact should not report itself ahead of the real problem.
+    _refuse_past_the_cap(base, ledger_id, gate, task_id)
+
+    label, artifact = _artifact_text(
+        base, gate, task_id, (getattr(args, "file", "") or "").strip())
+    text = _compose_brief(base, gate, label, artifact, task_id)
     path = base / ".factory" / f"grill-brief-{gate}" \
         f"{'-' + task_id if task_id else ''}.md"
     model, effort, _bound = mode_run_config(base, "grill")
