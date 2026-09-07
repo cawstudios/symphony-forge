@@ -21,6 +21,17 @@ from test_gates import HARNESS, git, load_factory_lib, post_hook, repo, run  # n
 sys.path.insert(0, str(HARNESS / "factory" / "scripts"))
 
 
+def _flat(text: str) -> str:
+    """Collapse whitespace.
+
+    These are hard-wrapped documents. A phrase assertion against raw text
+    breaks the moment someone re-flows a paragraph, which is a false failure
+    about formatting dressed as a failure about content.
+    """
+    return " ".join(text.split())
+
+
+
 # --------------------------------------------------- reading is not blocked
 def test_nothing_actually_prevents_reading_the_repo(repo: Path):
     """The rule was obeyed as a prohibition and ignored as an instruction.
@@ -55,11 +66,12 @@ def test_the_contract_tells_the_planner_to_read_first(repo: Path):
 
     planner = (HARNESS / "factory" / "prompts" / "planner.md").read_text(
         encoding="utf-8")
-    assert "FIRST, READ THE SYSTEM YOU ARE PLANNING AGAINST" in planner
+    flat = _flat(planner)
+    assert "FIRST, READ THE SYSTEM YOU ARE PLANNING AGAINST" in flat
     # And it must say WHY docs are not enough, or it reads as a style note.
-    assert "as designed" in planner and "what was built" in planner
+    assert "as designed" in flat and "what was built" in flat
     # The distinction that makes delegation safe: breadth yes, facts no.
-    assert "a summary of a type is not the type" in planner.lower()
+    assert "a summary of a type is not the type" in flat.lower()
 
 
 def test_forge_next_makes_reading_a_step_not_a_parenthesis(repo: Path):
@@ -170,3 +182,58 @@ def test_grill_rounds_are_still_recorded_after_the_removal(repo: Path):
     assert rounds, "the grill round was not recorded"
     record = json.loads(rounds[0].read_text(encoding="utf-8"))
     assert record["questions"][0]["chosen"] == "SAP"
+
+
+# ------------------------------------------------- the TASK plan, equally --
+def test_the_task_plan_authoring_step_reads_first_too(repo: Path):
+    """Both plans are written by the same session against the same codebase.
+
+    Only the story plan got the read-first step at first. The task plan is the
+    worse case: it names the exact files, types and routes the implementer
+    writes against, so a fact taken from a drifted doc does not cost a grill
+    round — it costs a worker paused mid-implementation against a contract
+    asking for something that is not there.
+    """
+    source = (HARNESS / "factory" / "scripts" / "forge_cli" / "phase.py"
+              ).read_text(encoding="utf-8")
+    first = source.index("FIRST read what {task_id} will touch")
+    then = source.index("THEN author the {task_id} plan")
+    assert first < then, "authoring must not come before reading"
+
+    step = source[first:then]
+    assert "migrations" in step, "a task plan names migrations; they must be read"
+    assert "permission codes" in step
+    assert "/codex:rescue" in step, "breadth still delegates"
+    # It must say what a wrong fact COSTS here, or it reads as the same
+    # boilerplate as the story-plan step and gets skimmed.
+    assert "paused mid-" in step
+
+
+def test_the_planner_contract_covers_both_plans(repo: Path):
+    # planner.md is the contract both authoring steps point at. If it reads as
+    # story-only, the task-plan step points at a document that does not
+    # obviously apply to it.
+    planner = (HARNESS / "factory" / "prompts" / "planner.md").read_text(
+        encoding="utf-8")
+    flat = _flat(planner)
+    assert "governs BOTH the story plan and each per-task plan" in flat
+    assert "binds harder for a TASK plan" in flat
+
+
+def test_both_authoring_steps_say_the_same_thing(repo: Path):
+    """One rule, two places — they must not drift.
+
+    This is the defect this whole PR exists to fix, applied to itself: the
+    story step and the task step are the same instruction, and a change to one
+    that misses the other re-creates the gap.
+    """
+    source = (HARNESS / "factory" / "scripts" / "forge_cli" / "phase.py"
+              ).read_text(encoding="utf-8")
+    story = source[source.index("FIRST read the system this plan will assert"):
+                   source.index("THEN plan per factory/prompts/planner.md")]
+    task = source[source.index("FIRST read what {task_id} will touch"):
+                  source.index("THEN author the {task_id} plan")]
+    for shared in ("Not the ", "architecture note", "/codex:rescue",
+                   "look up specific facts yourself"):
+        assert shared in story, f"story step lost: {shared!r}"
+        assert shared in task, f"task step lost: {shared!r}"

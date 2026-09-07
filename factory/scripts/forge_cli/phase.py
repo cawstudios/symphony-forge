@@ -483,7 +483,19 @@ def cmd_next(args: argparse.Namespace) -> None:
                     )
                 elif frontier == "author-task-plan":
                     steps.append(
-                        f"[dev] Author the {task_id} plan — do NOT present it in "
+                        f"[dev] FIRST read what {task_id} will touch — open the "
+                        "types, enums, routes, permission codes, migrations and "
+                        "decision records the contract will name. Not the "
+                        "architecture note describing them: the file. This plan "
+                        "names the exact surfaces the implementer writes against, "
+                        "so a fact taken from a doc that has drifted does not cost "
+                        "a grill round — it costs a worker paused mid-"
+                        "implementation against a contract that asked for "
+                        "something not there. Delegate BREADTH (/codex:rescue "
+                        "read-only) when the question is how a flow hangs "
+                        "together; look up specific facts yourself.")
+                    steps.append(
+                        f"[dev] THEN author the {task_id} plan — do NOT present it in "
                         "chat, and do NOT change the session's mode to write it "
                         "(authoring is mode-agnostic, 0050). It MUST carry "
                         "`## Workflow` (the end-to-end flow this task builds — a "
