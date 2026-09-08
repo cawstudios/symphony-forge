@@ -60,6 +60,10 @@ gate stay identical. What changes is how a Codex session reaches them.
   install detection (companion present → `claude`; otherwise `codex`).
   `harness.yaml` gains no runtime key; both adapters stay vendored in every
   repo, and `check_dual_runtime.py` keeps its path-parity checks.
+- codex-plugin-cc is needed only when Claude Code coordinates, because it is
+  the only way a Claude session can reach Codex. A Codex-native session
+  reaches Codex through its own hooks and subagents; the plugin is neither
+  installed, resolved, nor mentioned on that path.
 
 ### Delegation is a ledgered subagent spawn, never `codex exec`
 

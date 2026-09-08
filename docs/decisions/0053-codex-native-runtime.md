@@ -34,7 +34,8 @@ switch Codex into plan mode. Spec: `docs/specs/codex-native-runtime.md`.
 
 **The coordinating runtime is a machine fact, resolved by `forge`, and the
 `.factory` contract, recorders, schemas and gates are identical under
-either.** Under Codex:
+either.** codex-plugin-cc is needed only when Claude Code coordinates; a
+Codex-native session uses Codex hooks and subagents only. Under Codex:
 
 - **Delegation is a ledgered subagent spawn.** `forge delegate` composes the
   same brief, takes the same lock, derives write access from stage state,
