@@ -196,3 +196,60 @@ def test_legacy_single_file_story_snapshot_is_still_read_then_replaced(repo):
     assert not (story / "stages.json").exists()
     assert sorted(p.name for p in (story / "stages").glob("*.json")) == ["T1.json", "T2.json"]
     assert [s["status"] for s in load_story_stages(repo, "OLD-1")["stages"]] == ["done", "active"]
+
+
+def test_required_test_counts_as_writable_until_it_is_tracked(repo):
+    """A new test file this checkout already created is still new to the
+    sibling's checkout: both must not write it. Only a TRACKED proof drops out."""
+    from forge_cli.stages import _overlap_scope, scope_overlap
+    task = {**T2, "required_tests": [
+        {"id": "new", "path": "tests/new_test.py", "command": "true"},
+        {"id": "old", "path": "stage_contract_proof.py", "command": "true"},
+    ]}
+    (repo / "tests").mkdir()
+    (repo / "tests" / "new_test.py").write_text("")  # present, untracked
+    assert _overlap_scope(repo, task) == ["src/api", "tests/new_test.py"]
+    assert scope_overlap(_overlap_scope(repo, task), ["tests/new_test.py"]) == [
+        "tests/new_test.py ~ tests/new_test.py"]
+
+
+def _linked_worktree(repo: Path, name: str, task_id: str) -> Path:
+    worktree = repo.parent / f"{repo.name}-{name}"
+    git(repo, "worktree", "add", "-q", str(worktree), "-b", f"feat/{name}")
+    control = _control(worktree)
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "run.json").write_text(json.dumps(
+        {"issue_key": "OLD-1", "task_id": task_id, "branch": f"feat/{name}"}))
+    return worktree
+
+
+def test_task_worktree_first_write_migrates_every_legacy_record(repo):
+    worktree = _linked_worktree(repo, "OLD-1-T2", "T2")
+    story = worktree / ".factory" / "stories" / "OLD-1"
+    story.mkdir(parents=True)
+    legacy = [{"id": "T1", "title": "a", "status": "done"},
+              {"id": "T2", "title": "b", "status": "pending"},
+              {"id": "T3", "title": "c", "status": "pending"}]
+    (story / "stages.json").write_text(json.dumps({"issue": "OLD-1", "stages": legacy}))
+    write_stages(worktree, {"issue": "OLD-1", "stages": [
+        legacy[0], {**legacy[1], "status": "active"}, legacy[2]]})
+    assert not (story / "stages.json").exists()
+    assert [(s["id"], s["status"]) for s in load_story_stages(worktree, "OLD-1")["stages"]] == [
+        ("T1", "done"), ("T2", "active"), ("T3", "pending")]
+
+
+def test_active_stages_skip_a_worktree_whose_directory_is_gone(repo):
+    import shutil
+    worktree = _linked_worktree(repo, "OLD-1-T3", "T3")
+    control = _control(worktree)
+    (control / "stages.json").write_text(json.dumps({"issue": "OLD-1", "stages": [
+        {"id": "T3", "title": "c", "status": "active"}]}))
+    shutil.rmtree(worktree)  # deleted, never pruned
+    assert active_stages_everywhere(repo) == []
+
+
+def test_scope_change_names_root_level_files_too():
+    from forge_cli.signal import _named_paths
+    assert _named_paths("also touch README.md, package.json and src/api/x.py.",
+                        ["docs/a.md"]) == ["README.md", "package.json", "src/api/x.py", "docs/a.md"]
+    assert _named_paths("no files named here", []) == []

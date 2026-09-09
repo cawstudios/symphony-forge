@@ -165,19 +165,26 @@ def cmd_escalate(args: argparse.Namespace) -> None:
           f"  missing decision: {missing}")
 
 
+def _named_paths(message: str, refs: list[str]) -> list[str]:
+    """Paths a signal names: anything with a slash, or a root-level filename
+    (a bare token with an extension, like README.md or package.json)."""
+    import re
+    tokens = re.findall(r"[\w.-]*/[\w./-]+|[\w-]+\.[A-Za-z0-9]+", message)
+    strip = "`'\",.;:()"
+    return [t.strip(strip) for t in tokens + list(refs) if t.strip(strip)]
+
+
 def _refuse_sibling_scope(base: Path, message: str, refs: list[str]) -> None:
     """A scope change into a SIBLING active stage's write scope is not a
     question for the orchestrator to arbitrate mid-run; it is a plan error.
     Refused naming the sibling, so the coordinator re-plans the two tasks."""
-    import re
     from .stages import _covered, _overlap_scope, active_stages_everywhere, task_for
     own = load_json(run_state_path(base), default={}).get("task_id") or ""
     siblings = [(root, stage) for root, stage in active_stages_everywhere(base)
                 if stage.get("id") != own]
     if not own and len(siblings) == 1:
         return  # the only active stage is this run's own
-    named = [token.strip("`'\",.;:()") for token in
-             re.findall(r"[\w./-]*/[\w./-]+", message) + list(refs)]
+    named = _named_paths(message, refs)
     for root, stage in siblings:
         sibling = stage.get("id", "")
         scope = _overlap_scope(root, task_for(root, sibling) or task_for(base, sibling))

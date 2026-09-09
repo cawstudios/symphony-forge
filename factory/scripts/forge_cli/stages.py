@@ -153,6 +153,17 @@ def story_stage_records_dir(base: Path, issue: str) -> Path:
 def _write_story_records(base: Path, issue: str, stages: list[dict],
                          only: str = "") -> None:
     records = story_stage_records_dir(base, issue)
+    # The single-file snapshot this layout replaces: split it whole on the
+    # first write — a task worktree writing only its own record must not
+    # leave the other stages behind in a file the loader no longer reads.
+    legacy = story_dir(base, issue) / "stages.json"
+    if legacy.is_file():
+        for stage in load_json(legacy, default={}).get("stages") or []:
+            stage_id = stage.get("id") if isinstance(stage, dict) else None
+            if isinstance(stage_id, str) and Path(stage_id).name == stage_id \
+                    and not (records / f"{stage_id}.json").is_file():
+                dump_json(records / f"{stage_id}.json", stage)
+        legacy.unlink()
     for stage in stages:
         stage_id = stage.get("id")
         if not isinstance(stage_id, str) or Path(stage_id).name != stage_id:
@@ -162,11 +173,6 @@ def _write_story_records(base: Path, issue: str, stages: list[dict],
         target = records / f"{stage_id}.json"
         if load_json(target, default=None) != stage:
             dump_json(target, stage)
-    # The single-file snapshot this layout replaces; a stale copy would be read
-    # back as the story's state by an older checkout.
-    legacy = story_dir(base, issue) / "stages.json"
-    if not only and legacy.is_file():
-        legacy.unlink()
 
 
 def load_story_stages(base: Path, issue: str) -> dict:
@@ -800,12 +806,14 @@ def _overlap_scope(base: Path, task: dict) -> list[str]:
     test files it must create. This is what two parallel tasks must not share."""
     task_id = str(task.get("id") or "")
     scope = effective_scope(base, task_id, task.get("write_scope") or [])
-    # A required test that already exists is a proof the task must not break,
-    # not a file it writes (required_tests_outside_scope draws the same line).
+    # A required test that is already TRACKED is a proof the task must not
+    # break, not a file it writes (required_tests_outside_scope draws the same
+    # line). Tracked, not merely present: a file this checkout created is new
+    # to the sibling's checkout too, and both must not write it.
     scope += [
         path for path in (str((test or {}).get("path") or "")
                           for test in task.get("required_tests") or [])
-        if path and not (base / path).exists()
+        if path and not _git(base, "ls-files", "--", path).strip()
     ]
     return [entry.strip().rstrip("/") for entry in scope if entry and entry.strip()]
 
@@ -827,9 +835,10 @@ def active_stages_everywhere(base: Path) -> list[tuple[Path, dict]]:
     found: list[tuple[Path, dict]] = []
     seen: set[str] = set()
     for root in linked_worktree_roots(base):
+        # A pruned or deleted worktree keeps its git bookkeeping for a while.
         try:
-            data = load_stages(root)
-        except SystemExit:
+            data = load_stages(root) if root.is_dir() else {}
+        except (SystemExit, OSError):
             continue
         if not issue or data.get("issue") != issue:
             continue
