@@ -875,12 +875,13 @@ def _require_reviewed_commit(base: Path, stage: dict, task: dict) -> None:
     expected = stage_review_binding(base, stage, task)
     stage_id = stage.get("id")
     if not isinstance(stamp, dict):
-        fail(f"{stage_id} has no review stamp. Run `forge review {stage_id}` on the "
-             "committed tree — a run with no blocking finding stamps the stage — "
-             "then retry.")
+        fail(f"{stage_id} has no stage-local review stamp. Run `forge review "
+             f"{stage_id}` on the committed tree — a run with no blocking finding "
+             "stamps the stage — then retry.")
     stale = [key for key, value in expected.items() if stamp.get(key) != value]
     if stale:
-        fail(f"{stage_id} has a STALE review stamp ({', '.join(stale)} changed). "
+        fail(f"{stage_id} has a STALE stage-local review stamp "
+             f"({', '.join(stale)} changed). "
              f"Commit the final tree and rerun `forge review {stage_id}` "
              "(a done stage: `forge task reopen "
              f"{stage_id} --review-fix` first when fixes are still to land), then retry.")
