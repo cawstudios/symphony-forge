@@ -146,6 +146,11 @@ def _open(base: Path, *, profile: str, reason: str, by: str | None = None) -> di
     }
     if profile == DEGRADED:
         active["kind"] = DEGRADED
+        # Bind a mid-stage host-fix window to THE stage it serves: `stage done`
+        # accepts only a window whose task_id is its own.
+        if active_stages:
+            active["task_id"] = active_stages[0]
+            active["story"] = load_stages(base).get("issue", "")
     if by is not None:
         active["by"] = by
     if profile == LITE:
@@ -258,6 +263,9 @@ def cmd_mode_done(args: argparse.Namespace) -> None:
             "completed_at": now_iso(),
             "files": active.get("files", []),
         }
+        for field in ("task_id", "story"):
+            if field in active:
+                event[field] = active[field]
         _append(base, event)
         quickfix_path(base).unlink()
         print(f"Degraded mode {active['id']} done ({len(event['files'])} file(s)): "

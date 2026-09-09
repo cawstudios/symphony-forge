@@ -15,6 +15,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -1163,6 +1164,11 @@ def _host_window_covering(base: Path, stage: dict, task: dict) -> dict | None:
         # list proves nothing; a foreign file is another task's work.
         if not started or str(window.get("started_at") or "") < started:
             continue
+        # Bound to THIS stage at open time (quickfix records task_id when a
+        # degraded window opens mid-stage); an older, unbound window is
+        # refused — reopen one.
+        if window.get("task_id") != stage.get("id"):
+            continue
         files = [f for f in (window.get("files") or []) if isinstance(f, str)]
         if not files or len(files) > MAX_FILES:
             continue
@@ -1229,8 +1235,10 @@ def _require_successful_launch(base: Path, stage_id: str, stage: dict,
          "— when the fix is one Codex's sandbox cannot make (a DB-surfaced "
          "defect, a host-only check) — make it inside a ledgered window: "
          "`forge mode degraded start --reason \"<why Codex cannot>\"`, fix, "
-         "`forge mode done` (closed with at most five files, all inside the "
-         "task's write scope).")
+         "`forge mode done` (opened while THIS stage is active so it is bound "
+         "to it, closed with one to five files, all inside the task's write "
+         "scope; a window opened before this binding existed does not count — "
+         "reopen one).")
 
 
 def _junit_case_matches_id(case, test_id: str) -> bool:
@@ -1253,10 +1261,12 @@ def _junit_case_matches_id(case, test_id: str) -> bool:
     for sep in (" > ", " › ", "::"):
         if sep in name:
             candidates.append(name.rsplit(sep, 1)[-1].strip())
-    # A prefix counts only at a boundary — end, whitespace, '[' or '(' — so
-    # 'test_slice_extra' never satisfies 'test_slice'.
+    # A prefix counts only when a parameter suffix follows — '[' or '(' after
+    # optional whitespace — so neither 'test_slice_extra' nor 'test_slice more'
+    # satisfies 'test_slice'.
     return any(
-        c == wanted or (c.startswith(wanted) and c[len(wanted)] in " [(")
+        c == wanted or (c.startswith(wanted)
+                        and re.match(r"\s*[\[(]", c[len(wanted):]) is not None)
         for c in candidates
     )
 

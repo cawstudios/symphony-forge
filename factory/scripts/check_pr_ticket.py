@@ -128,17 +128,23 @@ def added_paths(root: Path, base: str) -> set[str]:
     RECEIVED, carrying every work record the trunk completed meanwhile; those
     are not this PR's to declare. A merge of a side branch is the PR's own
     work and its additions count."""
+    def added_by(sha: str, against: str) -> set[str]:
+        return _added_in(git_paths(
+            root, "diff-tree", "-r", "--no-commit-id", "--name-status",
+            "--diff-filter=A", against, sha,
+        ))
+
     in_tree = _added_in(git_paths(root, "diff", "--name-status", f"{base}..HEAD"))
     own: set[str] = set()
     for line in git(root, "log", "--format=%H %P", f"{base}..HEAD").splitlines():
         sha, *parents = line.split()
         if len(parents) > 1 and _is_ancestor(root, parents[1], base):
+            # A trunk merge: what it brought from the trunk is not ours, but a
+            # path present in NEITHER parent (added while resolving the merge)
+            # is — take the intersection of the additions against each parent.
+            own |= added_by(sha, parents[0]) & added_by(sha, parents[1])
             continue
-        against = [parents[0]] if parents else ["--root"]
-        own |= _added_in(git_paths(
-            root, "diff-tree", "-r", "--no-commit-id", "--name-status",
-            "--diff-filter=A", *against, sha,
-        ))
+        own |= added_by(sha, parents[0] if parents else "--root")
     return in_tree & own
 
 

@@ -19532,11 +19532,14 @@ def test_junit_case_matches_id_exact_and_leaf():
     assert _junit_case_matches_id(leaf_suffixed, "t1-boot-migrate")
     assert not _junit_case_matches_id(exact, "t1-boot-migrate [sqlite]")
     assert not _junit_case_matches_id(exact, "")
-    # A prefix needs a boundary: a longer test name is a different test.
+    # A prefix needs a parameter suffix ('[' or '('): a longer test name, or
+    # a plain-word continuation, is a different test.
     longer = ET.fromstring('<testcase name="t1-boot-migrate-extra"/>')
     assert not _junit_case_matches_id(longer, "t1-boot-migrate")
     assert not _junit_case_matches_id(
         ET.fromstring('<testcase name="test_slice_extra"/>'), "test_slice")
+    assert not _junit_case_matches_id(
+        ET.fromstring('<testcase name="t1-boot-migrate more"/>'), "t1-boot-migrate")
 
 
 def test_junit_case_attributed_file_or_classname_suffix():

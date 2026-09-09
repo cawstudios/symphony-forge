@@ -47,6 +47,11 @@ def test_closed_in_scope_degraded_window_is_the_stages_write_launch(
     code, out = run(repo, "forge.py", "mode", "done")
     assert code == 0, out
     stamp_and_commit(repo)
+    # The window was bound to THIS stage when it opened.
+    done_record = next(
+        json.loads(p.read_text()) for p in (repo / "plans" / "quickfixes").glob("*.json")
+        if json.loads(p.read_text()).get("event") == "done")
+    assert done_record["task_id"] == "T1" and done_record["story"] == "ENG-1"
     code, out = run(repo, "forge.py", "stage", "done", "T1")
     assert code == 0 and window_id in out, out
     stage = measured_stage(repo)
@@ -81,6 +86,21 @@ def test_an_open_or_out_of_scope_degraded_window_is_not_a_launch(
     assert code == 0 and "0 file(s)" in out, out
     code, out = run(repo, "forge.py", "stage", "done", "T1")
     assert code != 0 and "no successful write launch" in out, out
+    # An in-scope window recorded WITHOUT the stage binding (opened by older
+    # tooling): not this stage's — the refusal says to reopen one.
+    code, out = run(repo, "forge.py", "mode", "degraded", "start",
+                    "--reason", "host-only check")
+    assert code == 0, out
+    _claim(repo, "src/core.py")
+    code, out = run(repo, "forge.py", "mode", "done")
+    assert code == 0, out
+    for record in (repo / "plans" / "quickfixes").glob("*.json"):
+        data = json.loads(record.read_text())
+        if data.get("event") == "done" and data.pop("task_id", None):
+            data.pop("story", None)
+            record.write_text(json.dumps(data) + "\n")
+    code, out = run(repo, "forge.py", "stage", "done", "T1")
+    assert code != 0 and "no successful write launch" in out and "reopen" in out, out
     assert "host_window" not in measured_stage(repo)
 
 
@@ -214,15 +234,25 @@ def test_check_pr_ticket_ignores_records_merged_in_from_the_trunk(repo):
     git(repo, "checkout", "-q", trunk)
     _window_record(repo, merged, "trunk-done")
     git(repo, "checkout", "-q", "fix/own-window")
-    git(repo, "merge", "-q", "--no-ff", "--no-edit", trunk)
+    # ... and a record added while RESOLVING that merge (in neither parent)
+    # is the PR's own.
+    resolved = "Q-0045-rslv"
+    git(repo, "merge", "-q", "--no-ff", "--no-commit", trunk)
+    (repo / "plans" / "quickfixes" / "resolved-done.json").write_text(json.dumps({
+        "event": "done", "id": resolved, "files": ["src/fix.py"],
+    }) + "\n")
+    git(repo, "add", "plans/quickfixes/resolved-done.json")
+    git(repo, "commit", "-q", "-m", "merge trunk, resolving")
     # CI's base: the trunk merge-base at check time.
     base = git(repo, "merge-base", trunk, "fix/own-window")
 
     code, out = check_pr_ticket(repo, base, "fix/own-window", f"Ticket: {own}\n")
-    assert code != 0 and side in out and merged not in out, out
+    assert code != 0 and side in out and resolved in out and merged not in out, out
     code, out = check_pr_ticket(
-        repo, base, "fix/own-window", f"Ticket: {own}\nTicket: {side}\n")
+        repo, base, "fix/own-window",
+        f"Ticket: {own}\nTicket: {side}\nTicket: {resolved}\n")
     assert code == 0 and f"window {own}" in out and f"window {side}" in out, out
+    assert f"window {resolved}" in out
     assert merged not in out
 
 
