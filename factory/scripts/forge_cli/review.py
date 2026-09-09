@@ -511,7 +511,7 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     story = state.get("issue_key") or state.get("story")
     if not isinstance(story, str) or not story:
         fail("review reject requires an active story")
-    resolved = _cite_resolves(base, story, cite, task_id)
+    resolved, settled_text = _cite_resolves(base, story, cite, task_id)
     if not resolved:
         fail(f"--cite {cite!r} names nothing settled. A rejection cites a decision "
              "record (its NNNN id under docs/decisions/), a plan contract id of a "
@@ -540,6 +540,12 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     if len(hits) > 1:
         fail(f"{len(hits)} blocking {lens} findings match {match!r}; narrow it")
     finding = hits[0]
+    shared = _shared_terms(finding, settled_text)
+    if not shared:
+        fail(f"--cite {cite!r} resolves to {resolved}, but that text shares no "
+             "substantive term with the finding; a citation must be ABOUT the "
+             "finding it sets aside. Cite the decision, contract or section that "
+             "actually contradicts it, or fix the finding.")
     at = now_iso()
     artifact["blocking_findings"] = [
         f for f in artifact["blocking_findings"] if f is not finding]
@@ -553,7 +559,14 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     artifact["recommendation"] = _recommendation(blocking, non_blocking)
     dump_json(proof_path(base, story, rel, task_id=task_id, for_write=True), artifact)
     area = str(finding.get("area", "")).strip() if isinstance(finding, dict) else ""
-    applies_to = [f"{area}/**"] if area else ["**"]
+    # `area` is a directory for structured findings; a file-shaped value (an
+    # extension in its last segment) is kept as the file itself.
+    if not area:
+        applies_to = ["**"]
+    elif "." in area.rsplit("/", 1)[-1]:
+        applies_to = [area]
+    else:
+        applies_to = [f"{area}/**"]
     summary = (str(finding.get("summary", ""))[:160] if isinstance(finding, dict)
                else str(finding)[:160])
     lesson = {
@@ -572,7 +585,8 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
         record_id = f"{at.replace(':', '').replace('-', '')}-{lesson['topic']}"
         append_ledger_record(lessons_path(base), lesson, record_id)
     print(f"Rejected {lens} finding: {summary}\n  reason: {reason.strip()}\n  "
-          f"cite: {resolved}\n  ledgered as a lesson for {', '.join(applies_to)}")
+          f"cite: {resolved} (shared terms: {', '.join(shared[:4])})\n  "
+          f"ledgered as a lesson for {', '.join(applies_to)}")
     # A rejection only ever REMOVES one finding; it stamps the stage only when
     # the review set is complete and current — every lens recorded for THIS
     # task on THIS branch diff — so a lone lens or a stale run cannot seal.
@@ -637,8 +651,8 @@ def _review_set_problem(base: Path, story: str, task_id: str) -> str:
     return ""
 
 
-def _cite_resolves(base: Path, story: str, cite: str, task_id: str = "") -> str:
-    """The settled text a rejection rests on, or '' when nothing matches.
+def _cite_resolves(base: Path, story: str, cite: str, task_id: str = "") -> tuple[str, str]:
+    """(label, settled text) a rejection rests on, or ('', '') when nothing matches.
 
     Accepted forms, any token of `cite` split on `;`, `,` or whitespace:
     a decision id (`0154`, `decision 0154`) with a record under docs/decisions/;
@@ -653,18 +667,15 @@ def _cite_resolves(base: Path, story: str, cite: str, task_id: str = "") -> str:
     sealed = {s.get("id") for s in load_stages(base).get("stages", [])
               if isinstance(s, dict) and s.get("status") == "done"}
     contract_ids = {
-        str(c.get("id"))
+        str(c.get("id")): str(c.get("statement", ""))
         for t in decomposition.get("tasks") or [] if isinstance(t, dict)
         if t.get("id") in sealed and t.get("id") != task_id
         for c in t.get("plan_contracts") or [] if isinstance(c, dict)
     }
-    headers: list[str] = []
+    from .review_brief import _plan_section_bodies
+    sections: list[tuple[str, str]] = []
     for plan in sorted((base / "plans" / "active").glob(f"{story}-*.md"))[:1]:
-        try:
-            headers = [ln[3:].strip() for ln in plan.read_text(encoding="utf-8").splitlines()
-                       if ln.startswith("## ")]
-        except OSError:
-            headers = []
+        sections = _plan_section_bodies(_read_text(plan), ("",))
     # Scaffolding headers every plan carries name nothing settled; a citation
     # of "Risks" or "Problem" is not a contract.
     generic = {"problem", "context", "scope / non-goals", "scope", "risks",
@@ -672,18 +683,44 @@ def _cite_resolves(base: Path, story: str, cite: str, task_id: str = "") -> str:
                "task decomposition", "grill provenance", "acceptance criteria",
                "manual verification", "workflow"}
     for token in tokens:
-        if re.fullmatch(r"\d{4}", token) and any(decisions.glob(f"{token}-*.md")):
-            return f"decision {token}"
+        if re.fullmatch(r"\d{4}", token):
+            record = next(iter(sorted(decisions.glob(f"{token}-*.md"))), None)
+            if record is not None:
+                return f"decision {token}", _read_text(record)
         if token in contract_ids:
-            return f"contract {token}"
+            return f"contract {token}", contract_ids[token]
         if len(token) < 2 or (len(token) < 3 and not re.fullmatch(r"[A-Z]\d+", token)):
             continue
-        for header in headers:
+        for header, body in sections:
             if header.strip().lower() in generic:
                 continue
             if re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", header, re.I):
-                return f"plan section '{header}'"
-    return ""
+                return f"plan section '{header}'", f"{header}\n{body}"
+    return "", ""
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+_STOPWORDS = {"about", "after", "before", "should", "would", "could", "their",
+              "there", "these", "those", "which", "while", "where", "being",
+              "every", "never", "always", "still", "other", "under", "against",
+              "within", "without", "review", "finding", "blocking", "task"}
+
+
+def _shared_terms(finding: dict | str, source: str) -> list[str]:
+    """Substantive words (5+ letters, not stopwords) the finding and the cited
+    settled text have in common. A citation that shares none is not about
+    this finding, whatever it resolves to."""
+    def terms(text: str) -> set[str]:
+        return {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z_]{4,}", text)
+                if w.lower() not in _STOPWORDS}
+    finding_text = json.dumps(finding) if isinstance(finding, dict) else str(finding)
+    return sorted(terms(finding_text) & terms(source))
 
 
 def cmd_review(args: argparse.Namespace) -> None:

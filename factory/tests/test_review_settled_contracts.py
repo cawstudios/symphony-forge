@@ -44,7 +44,7 @@ def _story(repo, tmp_path, *, t1_status: str = "done") -> None:
     intake(repo)
     save_plan(repo, tmp_path)
     t1 = {**skeletal_stage_task("T1"),
-          "plan_contracts": [{"id": "T1-AC1", "statement": "the exact memory answers a destructive ask",
+          "plan_contracts": [{"id": "T1-AC1", "statement": "a remembered exact Allow answers a destructive ask; the rail hardFloor flag never gates the remembered lookup",
                               "source": "plan#ac"}]}
     t2 = skeletal_stage_task("T2")
     record_skeleton_then_frontier(repo, [t1, t2])
@@ -75,7 +75,7 @@ def test_brief_carries_plan_decisions_and_sealed_contracts(repo, tmp_path):
     brief = "\n".join(_task_section(task, repo))
     assert "Settled — do not relitigate" in brief
     assert "0154 (amended): old rows are not listed." in brief
-    assert "T1-AC1" in brief and "the exact memory answers a destructive ask" in brief
+    assert "T1-AC1" in brief and "a remembered exact Allow answers a destructive ask" in brief
     # A task that is not sealed contributes nothing.
     _story_pending = load_stages(repo)
     _story_pending["stages"][0]["status"] = "pending"
@@ -138,7 +138,8 @@ def test_reject_refuses_a_citation_that_names_nothing_settled(repo, tmp_path):
     assert recorded["blocking_findings"] == [hard]
     # A decision id resolves; so does a plan section header word.
     (repo / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
-    (repo / "docs" / "decisions" / "0154-generic-scope.md").write_text("# 0154\n")
+    (repo / "docs" / "decisions" / "0154-generic-scope.md").write_text(
+        "# 0154 generic scope\n\nA remembered hardFloor decision stays a human decision.\n")
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
                     "--lens", "security", "--reason", "r", "--cite", "decision 0154",
                     "--by", "autoreview")
@@ -217,19 +218,21 @@ def test_generic_plan_headers_do_not_resolve_a_citation(repo, tmp_path):
     _story(repo, tmp_path)
     plan = next((repo / "plans" / "active").glob("ENG-1-*.md"))
     plan.write_text(plan.read_text() + "\n## Risks\nnone\n\n## Owner rulings\n- S4 stays\n")
-    assert _cite_resolves(repo, "ENG-1", "Risks", "T2") == ""
-    assert _cite_resolves(repo, "ENG-1", "rulings", "T2") == "plan section 'Owner rulings'"
-    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2") == "contract T1-AC1"
-    assert _cite_resolves(repo, "ENG-1", "c", "T2") == ""
+    assert _cite_resolves(repo, "ENG-1", "Risks", "T2")[0] == ""
+    assert _cite_resolves(repo, "ENG-1", "rulings", "T2") == (
+        "plan section 'Owner rulings'", "Owner rulings\n- S4 stays")
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2")[0] == "contract T1-AC1"
+    assert "hardFloor" in _cite_resolves(repo, "ENG-1", "T1-AC1", "T2")[1]
+    assert _cite_resolves(repo, "ENG-1", "c", "T2")[0] == ""
     # Only a SEALED task's contract is settled: not this task's own, not a
     # pending task's, and not T1's once its stage is no longer done.
     data = load_stages(repo)
     data["stages"][1]["task_sha256"] = "def"
     write_stages(repo, data)
-    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T1") == ""
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T1")[0] == ""
     data["stages"][0]["status"] = "pending"
     write_stages(repo, data)
-    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2") == ""
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2")[0] == ""
 
 
 def test_rejected_findings_report_lists_each_rejection_for_the_pr_body(repo, tmp_path):
@@ -246,3 +249,26 @@ def test_rejected_findings_report_lists_each_rejection_for_the_pr_body(repo, tmp
     assert "- **security**: hardFloor thing" in report
     assert "rejected because: the rail case keys the consult" in report
     assert "cites: T1-AC1" in report
+
+
+def test_reject_refuses_a_citation_unrelated_to_the_finding(repo, tmp_path):
+    from forge_cli.review import _shared_terms
+    _story(repo, tmp_path)
+    unrelated = {"category": "bug", "area": "src/billing/invoice.ts",
+                 "summary": "Invoice totals ignore the currency rounding rule"}
+    _record_lens(repo, "quality", [unrelated])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "Invoice",
+                    "--lens", "quality", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code != 0 and "shares no substantive term" in out, out
+    assert _shared_terms({"summary": "hardFloor gating of the remembered lookup"},
+                         "the rail hardFloor flag never gates the remembered lookup") == [
+        "hardfloor", "lookup", "remembered"]
+    # A file-shaped area is ledgered as that file, not as a directory glob.
+    related = {"category": "security", "area": "src/runtime/coordinator.ts",
+               "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [related])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code == 0 and "ledgered as a lesson for src/runtime/coordinator.ts" in out, out
