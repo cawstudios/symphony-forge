@@ -574,8 +574,11 @@ def cmd_review(args: argparse.Namespace) -> None:
     # decided: fixing a finding the review just raised is the work, and it goes
     # to Codex like every other write.
     if blocking_total:
-        print(f"NEXT: {blocking_total} blocking finding(s) — delegate the fixes to "
-              f"Codex (`./forge delegate {args.id}`), commit, then rerun "
+        print(f"NEXT: {blocking_total} blocking finding(s) — reopen the stage for "
+              f"the fix (`./forge task reopen {args.id} --review-fix`; delegate "
+              "writes only inside an active stage), delegate the fixes to Codex "
+              f"(`./forge delegate {args.id}`), commit, record a fresh stage-local "
+              f"review stamp, `./forge stage done {args.id}`, then rerun "
               f"`./forge review {args.id}`. Loop until every lens is clean. "
               "Do this WITHOUT asking the human to choose: a blocking finding "
               "cannot be deferred or shipped past (pr-ready refuses it), so "

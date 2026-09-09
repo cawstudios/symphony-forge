@@ -209,7 +209,8 @@ if args.aspect == "stage-local":
         if len(active) != 1:
             raise SystemExit(
                 "stage-local review requires exactly one active stage "
-                f"(found {len(active)})"
+                f"(found {len(active)}). Restamping a done stage after review "
+                "fixes: `forge task reopen <id> --review-fix` first."
             )
         stage = active[0]
         task = task_for(root, stage.get("id", ""))

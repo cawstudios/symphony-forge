@@ -219,6 +219,13 @@ def main() -> None:
              "base); `stage start` pins the reopened stage to it so the diff is the "
              "task's real delta, not an empty diff from today's HEAD",
     )
+    p_task_reopen.add_argument(
+        "--review-fix", action="store_true",
+        help="reopen a done stage for review fixes only: it goes back to active "
+             "with its base, contract and plan approval intact and only the "
+             "stage-local review stamp dropped — delegate the fixes, restamp, "
+             "`stage done`, `review` again",
+    )
     p_task_reopen.add_argument("--repo")
     p_task_reopen.set_defaults(func=tasks_mod.cmd_task_reopen)
     p_task_reconcile = task_sub.add_parser(

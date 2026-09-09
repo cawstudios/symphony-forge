@@ -875,8 +875,10 @@ def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
              "(record_decomposition_from_json.py creates the stage tracker)")
     stage = _find(data, args.id)
     if stage.get("status") == "done":
-        fail(f"{args.id} is already done — stages don't reopen; a follow-up is a "
-             "new stage in a re-recorded decomposition")
+        fail(f"{args.id} is already done — stages don't restart. Review fixes: "
+             f"`forge task reopen {args.id} --review-fix` (back to active, same "
+             "base and contract). New work: a follow-up stage in a re-recorded "
+             "decomposition.")
     if stage.get("status") == "active":
         # No re-baselining, ever (decision 0023). The baseline is a ref written
         # once at start; a contract that changes mid-stage is LEDGERED, not
