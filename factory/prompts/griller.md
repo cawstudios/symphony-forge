@@ -214,8 +214,12 @@ Five gates, five scopes:
   is the hard refusal point. Interrogate the next leaf task's just-authored
   contract in the re-recorded decomposition against the approved story plan,
   active decisions, and the actual repository state left by completed prior
-  stages. Hunt: assumed files or APIs that prior work did not produce, stale
-  or over-broad `write_scope`, acceptance criteria not served by the proposed
+  stages. Hunt: assumed files or APIs that prior work did not produce, a
+  `write_scope` whose AREAS miss where the work must land or reach into areas
+  the task has no business in (scope is directory prefixes plus named new
+  files — a missing existing file under a declared prefix, a drifted line
+  number or a renamed module is a NON-BLOCKING note, never a blocking finding;
+  `stage done` measures the exact paths), acceptance criteria not served by the proposed
   work, a task that OWNS a plan `## Surface Impact` surface but whose
   `write_scope`/`required_tests` do not actually PRODUCE it (owns the API row but
   builds only domain services with no HTTP controllers/DTOs/routes; owns the UI
