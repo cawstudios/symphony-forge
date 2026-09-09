@@ -485,10 +485,103 @@ def _run_skill(skill: Path, worktree: Path, base_sha: str, prompt_rel: str,
     return json.loads(json_out.read_text(encoding="utf-8"))
 
 
+def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
+                   reason: str, cite: str, by: str) -> dict:
+    """Move a recorded blocking finding that contradicts an accepted contract
+    out of the blocking list, ledger the contract as a lesson so the next
+    round's brief carries it, and stamp the stage if no lens blocks any more.
+
+    Rejection is for contradictions of settled decisions, never for taste:
+    `cite` names the decision, plan line or sealed contract. The finding stays
+    in the artifact under `rejected_findings` with the reason, so the record
+    shows what was raised and why it did not block."""
+    from factory_lib import append_ledger_record, dump_json, now_iso
+    from .lessons import lessons_path, load_lessons
+    from .stages import load_stages, stamp_stage_review
+
+    if lens not in LENSES:
+        fail(f"--lens must be one of {', '.join(LENSES)}")
+    for name, value in (("--reason", reason), ("--cite", cite), ("--by", by)):
+        if not (value or "").strip():
+            fail(f"{name} must be non-empty: a rejection names the accepted "
+                 "contract it rests on")
+    state = load_json(run_state_path(base), default={})
+    story = state.get("issue_key") or state.get("story")
+    if not isinstance(story, str) or not story:
+        fail("review reject requires an active story")
+    rel = f"reviews/{lens}.json"
+    path = evidence_path(base, story, rel)
+    artifact = load_json(path, default={})
+    if not artifact:
+        fail(f"no recorded {lens} review for {story}")
+    needle = match.strip().lower()
+    hits = [f for f in artifact.get("blocking_findings") or []
+            if needle in json.dumps(f).lower()]
+    if not hits:
+        fail(f"no blocking {lens} finding matches {match!r}")
+    if len(hits) > 1:
+        fail(f"{len(hits)} blocking {lens} findings match {match!r}; narrow it")
+    finding = hits[0]
+    at = now_iso()
+    artifact["blocking_findings"] = [
+        f for f in artifact["blocking_findings"] if f is not finding]
+    artifact.setdefault("rejected_findings", []).append({
+        "finding": finding, "reason": reason.strip(), "cite": cite.strip(),
+        "rejected_at": at, "rejected_by": by.strip(), "task_id": task_id,
+    })
+    blocking = len(artifact["blocking_findings"])
+    non_blocking = len(artifact.get("non_blocking_findings") or [])
+    artifact["score"] = _score(blocking, non_blocking)
+    artifact["recommendation"] = _recommendation(blocking, non_blocking)
+    dump_json(evidence_path(base, story, rel, for_write=True), artifact)
+    area = str(finding.get("area", "")).strip() if isinstance(finding, dict) else ""
+    applies_to = [f"{area}/**"] if area else ["**"]
+    summary = (str(finding.get("summary", ""))[:160] if isinstance(finding, dict)
+               else str(finding)[:160])
+    lesson = {
+        "topic": f"rejected-review-finding-{lens}",
+        "lesson": f"Not a defect ({cite.strip()}): {reason.strip()} — raised as "
+                  f"\"{summary}\"",
+        "source": f"review reject {task_id} {lens} at {at}",
+        "applies_to": applies_to,
+        "severity": "medium",
+        "generated_by": by.strip(),
+        "added_at": at,
+    }
+    existing = load_lessons(base)
+    if not any(l.get("lesson", "").strip().lower() == lesson["lesson"].lower()
+               for l in existing):
+        record_id = f"{at.replace(':', '').replace('-', '')}-{lesson['topic']}"
+        append_ledger_record(lessons_path(base), lesson, record_id)
+    remaining = 0
+    for other in LENSES:
+        recorded = load_json(evidence_path(base, story, f"reviews/{other}.json"),
+                             default={})
+        remaining += len(recorded.get("blocking_findings") or []) if recorded else 0
+    stage = next((s for s in load_stages(base).get("stages", [])
+                  if s.get("id") == task_id), {})
+    print(f"Rejected {lens} finding: {summary}\n  reason: {reason.strip()}\n  "
+          f"cite: {cite.strip()}\n  ledgered as a lesson for {', '.join(applies_to)}")
+    if remaining:
+        print(f"{remaining} blocking finding(s) remain across the lenses.")
+    elif stage.get("status") in ("active", "done"):
+        stamp_stage_review(base, task_id, lenses=LENSES)
+        print(f"No lens blocks any more; stage {task_id} review stamp recorded. "
+              + ("`./forge stage done` then " if stage.get("status") == "active" else "")
+              + f"`./forge task pr-ready {task_id}`.")
+    return artifact
+
+
 def cmd_review(args: argparse.Namespace) -> None:
     from .stages import WORKFLOW_PATHS, load_stages, task_for
 
     base = Path(args.repo).resolve() if args.repo else repo_root()
+    if getattr(args, "reject", None):
+        reject_finding(base, args.id, getattr(args, "lens", None) or "",
+                       args.reject, reason=getattr(args, "reason", "") or "",
+                       cite=getattr(args, "cite", "") or "",
+                       by=getattr(args, "by", "") or "")
+        return
     task = task_for(base, args.id)
     if not task:
         fail(f"task {args.id} is not in the recorded decomposition")
