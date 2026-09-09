@@ -72,7 +72,31 @@ def test_an_open_or_out_of_scope_degraded_window_is_not_a_launch(
     # Closed, but it touched a path outside the task's write scope.
     code, out = run(repo, "forge.py", "stage", "done", "T1")
     assert code != 0 and "no successful write launch" in out, out
+    # Closed with NO files: proves nothing about this task.
+    code, out = run(repo, "forge.py", "mode", "degraded", "start",
+                    "--reason", "host-only check")
+    assert code == 0, out
+    _claim(repo)
+    code, out = run(repo, "forge.py", "mode", "done")
+    assert code == 0 and "0 file(s)" in out, out
+    code, out = run(repo, "forge.py", "stage", "done", "T1")
+    assert code != 0 and "no successful write launch" in out, out
     assert "host_window" not in measured_stage(repo)
+
+
+def test_plan_digest_keeps_authored_frontmatter_and_drops_save_stamps(tmp_path):
+    body = "\n## Problem\nText.\n"
+    plan = tmp_path / "plan.md"
+    plan.write_text("---\ndecisions_reviewed:\n  - 0001-a\n---\n" + body)
+    draft = plan_digest_without_assumptions(plan)
+    # What `plan save` stamps (issue/title/status/saved/story) is not hashed.
+    plan.write_text("---\nissue: ENG-1\ntitle: T\nstatus: awaiting-approval\n"
+                    "saved: 2026-09-09T00:00:00+00:00\nstory: ENG-1\n"
+                    "decisions_reviewed:\n  - 0001-a\n---\n" + body)
+    assert plan_digest_without_assumptions(plan) == draft
+    # Editing what was grilled — decisions_reviewed — re-stales it.
+    plan.write_text("---\ndecisions_reviewed:\n  - 0002-b\n---\n" + body)
+    assert plan_digest_without_assumptions(plan) != draft
 
 
 def test_one_plan_grill_before_save_still_matches_after_save(repo, tmp_path):
@@ -176,18 +200,30 @@ def _window_record(repo: Path, window_id: str, name: str) -> None:
 
 
 def test_check_pr_ticket_ignores_records_merged_in_from_the_trunk(repo):
-    base = pr_ticket_base(repo)
+    pr_ticket_base(repo)
     trunk = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    own, merged = "Q-0042-own1", "Q-0043-trnk"
+    own, merged, side = "Q-0042-own1", "Q-0043-trnk", "Q-0044-side"
     git(repo, "checkout", "-q", "-b", "fix/own-window")
     _window_record(repo, own, "own-done")
+    # A side branch of the PR's own work, merged into the PR branch.
+    git(repo, "checkout", "-q", "-b", "fix/side")
+    _window_record(repo, side, "side-done")
+    git(repo, "checkout", "-q", "fix/own-window")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "fix/side")
+    # The trunk moves on and is merged in.
     git(repo, "checkout", "-q", trunk)
     _window_record(repo, merged, "trunk-done")
     git(repo, "checkout", "-q", "fix/own-window")
     git(repo, "merge", "-q", "--no-ff", "--no-edit", trunk)
+    # CI's base: the trunk merge-base at check time.
+    base = git(repo, "merge-base", trunk, "fix/own-window")
 
     code, out = check_pr_ticket(repo, base, "fix/own-window", f"Ticket: {own}\n")
-    assert code == 0 and f"window {own}" in out and merged not in out, out
+    assert code != 0 and side in out and merged not in out, out
+    code, out = check_pr_ticket(
+        repo, base, "fix/own-window", f"Ticket: {own}\nTicket: {side}\n")
+    assert code == 0 and f"window {own}" in out and f"window {side}" in out, out
+    assert merged not in out
 
 
 FAKE_UPSTREAM = "a" * 40
@@ -243,6 +279,31 @@ def test_doctor_reports_a_stale_autoreview_copy_and_fix_refreshes_both_homes(
 
     # Upstream moves again: stale again, until the next --fix.
     assert not doctor._autoreview_status(tmp_path, "b" * 40)[0]
+
+
+def test_doctor_refresh_backs_up_a_locally_modified_skill(tmp_path, monkeypatch):
+    from forge_cli import doctor
+
+    codex_copy = doctor._autoreview_dir(tmp_path)
+    _fake_git(monkeypatch)
+    assert doctor._autoreview_install(tmp_path, FAKE_UPSTREAM)
+    recorded = (codex_copy / ".installed-digest").read_text().strip()
+    assert recorded == doctor._autoreview_tree_digest(codex_copy)
+
+    # Untouched: a refresh replaces in place, no backup.
+    _fake_git(monkeypatch, upstream="b" * 40)
+    assert doctor._autoreview_install(tmp_path, "b" * 40)
+    assert not list(codex_copy.parent.glob("autoreview.bak-*"))
+
+    # Modified locally: the tree is moved aside before the fresh copy lands.
+    (codex_copy / "SKILL.md").write_text("my local tweak\n")
+    _fake_git(monkeypatch, upstream="c" * 40)
+    assert doctor._autoreview_install(tmp_path, "c" * 40)
+    backups = list(codex_copy.parent.glob("autoreview.bak-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "SKILL.md").read_text() == "my local tweak\n"
+    assert (codex_copy / "SKILL.md").read_text() == "fresh reviewer\n"
+    assert (codex_copy / ".upstream-sha").read_text().strip() == "c" * 40
 
 
 def test_doctor_autoreview_refresh_skips_offline_and_never_creates_claude_copy(

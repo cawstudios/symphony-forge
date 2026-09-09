@@ -1850,10 +1850,22 @@ def plan_body_digest(path: Path) -> str:
     """
     raw = path.read_bytes()
     normalised = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    frontmatter = re.match(br"\A---\n.*?\n---\n", normalised, re.DOTALL)
+    frontmatter = re.match(br"\A---\n(.*?)\n---\n", normalised, re.DOTALL)
     body = normalised[frontmatter.end():] if frontmatter else normalised
+    # Authored frontmatter (decisions_reviewed, ...) is part of what was
+    # grilled and approved, so it is hashed too; only the fields `plan save`
+    # stamps itself are dropped, so saving never changes the digest.
+    authored = b"\n".join(
+        line for line in (frontmatter.group(1).split(b"\n") if frontmatter else [])
+        if not re.match(PLAN_SAVE_OWNED_FIELDS, line)
+    )
     approved_body = body.partition(b"\n## Implementation Assumptions")[0]
-    return hashlib.sha256(approved_body).hexdigest()
+    return hashlib.sha256(authored + b"\n---\n" + approved_body).hexdigest()
+
+
+# Frontmatter keys `plan save` writes itself (plus saved:/updated: stamps):
+# harness bookkeeping, never something a grill read.
+PLAN_SAVE_OWNED_FIELDS = rb"(issue|title|status|saved|updated|story):"
 
 
 def approved_plan_digest(

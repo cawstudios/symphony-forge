@@ -13879,8 +13879,9 @@ def test_stage_done_refuses_missing_required_test(repo, tmp_path):
 
 
 def test_stage_done_matches_required_test_by_id_prefix(repo, tmp_path):
-    # The recorded id is a PREFIX of the testcase name (a parametrised or
-    # suffixed case): that identifies the test, no miss is recorded.
+    # The recorded id is a PREFIX of the testcase name at a boundary (a
+    # parametrised case, 'test_slice[a]'): that identifies the test, no miss
+    # is recorded. 'test_slice_extra' would NOT (see the unit test).
     test_id = "test_slice"
     path = "src/test_core.py"
     task = {**STAGE_TASK, "required_tests": [{
@@ -13890,7 +13891,8 @@ def test_stage_done_matches_required_test_by_id_prefix(repo, tmp_path):
     }]}
     start_stage(repo, tmp_path, task)
     write_in_scope(repo, "src/core.py")
-    write_in_scope(repo, path, "def test_slice_extra():\n    pass\n")
+    write_in_scope(repo, path, "import pytest\n\n@pytest.mark.parametrize"
+                   "('case', ['a'])\ndef test_slice(case):\n    pass\n")
     stamp_and_commit(repo)
     code, out = run(repo, "forge.py", "stage", "done", "T1")
     assert code == 0, out
@@ -19530,6 +19532,11 @@ def test_junit_case_matches_id_exact_and_leaf():
     assert _junit_case_matches_id(leaf_suffixed, "t1-boot-migrate")
     assert not _junit_case_matches_id(exact, "t1-boot-migrate [sqlite]")
     assert not _junit_case_matches_id(exact, "")
+    # A prefix needs a boundary: a longer test name is a different test.
+    longer = ET.fromstring('<testcase name="t1-boot-migrate-extra"/>')
+    assert not _junit_case_matches_id(longer, "t1-boot-migrate")
+    assert not _junit_case_matches_id(
+        ET.fromstring('<testcase name="test_slice_extra"/>'), "test_slice")
 
 
 def test_junit_case_attributed_file_or_classname_suffix():

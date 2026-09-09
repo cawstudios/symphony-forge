@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import importlib.util
 import json
 import os
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from factory_lib import decomposition_state_path, load_json, parse_sections, repo_root
@@ -499,10 +501,46 @@ def _autoreview_status(home: Path, upstream_sha: str) -> tuple[bool, str]:
     return True, str(target)
 
 
+AUTOREVIEW_DIGEST_FILE = ".installed-digest"
+_AUTOREVIEW_STAMPS = {AUTOREVIEW_SHA_FILE, AUTOREVIEW_DIGEST_FILE}
+
+
+def _autoreview_tree_digest(target: Path) -> str:
+    """Content digest of an installed skill tree, stamps excluded."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in target.rglob("*") if p.is_file()):
+        rel = path.relative_to(target).as_posix()
+        if rel in _AUTOREVIEW_STAMPS:
+            continue
+        digest.update(rel.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def _autoreview_backup_if_modified(target: Path) -> Path | None:
+    """A refresh must never silently overwrite local edits: when the tree no
+    longer matches the digest recorded at install (or has none), move it
+    aside to <dir>.bak-<timestamp> first and say so. Returns the backup."""
+    if not target.is_dir():
+        return None
+    try:
+        recorded = (target / AUTOREVIEW_DIGEST_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        recorded = ""
+    if recorded == _autoreview_tree_digest(target):
+        return None
+    backup = target.with_name(
+        f"{target.name}.bak-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}")
+    shutil.move(str(target), str(backup))
+    print(f"[fix ] {target} was modified locally; kept as {backup}")
+    return backup
+
+
 def _autoreview_install(home: Path, upstream_sha: str) -> bool:
     """Copy skills/autoreview from a fresh shallow clone into
     ~/.codex/skills/autoreview and — when that copy exists — into
-    ~/.claude/skills/autoreview too, stamping the upstream sha in each."""
+    ~/.claude/skills/autoreview too, stamping the upstream sha and the
+    installed tree's digest in each. A locally modified copy is backed up
+    first (see _autoreview_backup_if_modified)."""
     targets = [_autoreview_dir(home)]
     claude_copy = home / ".claude" / "skills" / "autoreview"
     if claude_copy.is_dir():
@@ -518,9 +556,12 @@ def _autoreview_install(home: Path, upstream_sha: str) -> bool:
         sha = cloned.strip() if code == 0 and re.fullmatch(
             r"[0-9a-f]{40}", cloned.strip()) else upstream_sha
         for target in targets:
+            _autoreview_backup_if_modified(target)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src, target, dirs_exist_ok=True)
             (target / AUTOREVIEW_SHA_FILE).write_text(sha + "\n", encoding="utf-8")
+            (target / AUTOREVIEW_DIGEST_FILE).write_text(
+                _autoreview_tree_digest(target) + "\n", encoding="utf-8")
     return True
 
 

@@ -112,19 +112,33 @@ def _added_in(lines: str) -> set[str]:
     return added
 
 
+def _is_ancestor(root: Path, commit: str, of: str) -> bool:
+    return subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, of], cwd=root,
+        capture_output=True, text=True, encoding="utf-8", errors="strict",
+    ).returncode == 0
+
+
 def added_paths(root: Path, base: str) -> set[str]:
     """Paths this PR's OWN commits added: new at HEAD relative to `base` AND
-    introduced by a first-parent, non-merge commit in base..HEAD.
+    introduced by a commit in base..HEAD that is not a TRUNK merge.
 
-    A merge commit is something the branch RECEIVED — the trunk merged in,
-    carrying every work record the trunk completed meanwhile. Those records
-    are not this PR's to declare, so a tree diff alone (which attributes them
-    to the branch) reported them as "undeclared"."""
+    A trunk merge (a merge whose second parent is already an ancestor of
+    `base`, the trunk merge-base at check time) is something the branch
+    RECEIVED, carrying every work record the trunk completed meanwhile; those
+    are not this PR's to declare. A merge of a side branch is the PR's own
+    work and its additions count."""
     in_tree = _added_in(git_paths(root, "diff", "--name-status", f"{base}..HEAD"))
-    own = _added_in(git_paths(
-        root, "log", "--first-parent", "--no-merges", "--format=",
-        "--name-status", "--diff-filter=A", f"{base}..HEAD",
-    ))
+    own: set[str] = set()
+    for line in git(root, "log", "--format=%H %P", f"{base}..HEAD").splitlines():
+        sha, *parents = line.split()
+        if len(parents) > 1 and _is_ancestor(root, parents[1], base):
+            continue
+        against = [parents[0]] if parents else ["--root"]
+        own |= _added_in(git_paths(
+            root, "diff-tree", "-r", "--no-commit-id", "--name-status",
+            "--diff-filter=A", *against, sha,
+        ))
     return in_tree & own
 
 

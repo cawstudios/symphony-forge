@@ -1157,10 +1157,14 @@ def _host_window_covering(base: Path, stage: dict, task: dict) -> dict | None:
     for window in closed_windows(base):
         if profile_of(window) != DEGRADED and window.get("kind") != DEGRADED:
             continue
-        if str(window.get("started_at") or "") < started:
+        # Opened while THIS stage was active (the stage is still active now,
+        # so a later start is enough) and tied to it by what it touched: a
+        # NON-EMPTY file list, every file inside the effective scope. An empty
+        # list proves nothing; a foreign file is another task's work.
+        if not started or str(window.get("started_at") or "") < started:
             continue
         files = [f for f in (window.get("files") or []) if isinstance(f, str)]
-        if len(files) > MAX_FILES:
+        if not files or len(files) > MAX_FILES:
             continue
         if all(_covered(path, scope) for path in files):
             return window
@@ -1249,7 +1253,12 @@ def _junit_case_matches_id(case, test_id: str) -> bool:
     for sep in (" > ", " › ", "::"):
         if sep in name:
             candidates.append(name.rsplit(sep, 1)[-1].strip())
-    return any(c == wanted or c.startswith(wanted) for c in candidates)
+    # A prefix counts only at a boundary — end, whitespace, '[' or '(' — so
+    # 'test_slice_extra' never satisfies 'test_slice'.
+    return any(
+        c == wanted or (c.startswith(wanted) and c[len(wanted)] in " [(")
+        for c in candidates
+    )
 
 
 def _junit_case_attributed(case, rel: str) -> bool:
