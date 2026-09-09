@@ -442,7 +442,16 @@ sequence a JIT contract loop for every pending task:
    start --reason ...`), make the MINIMAL host fix, log it with `forge signal
    raise --kind host-exception`, verify host-side, and resume.
 11. `forge stage done <id>` — it seals on the review stamp and measures the
-   delta. A review that finds blockers AFTER the stage closed reopens it for
+   delta. It REFUSES only when verify or a required test fails, or the review
+   stamp is missing or stale. Write-scope strays, a review-budget overrun and
+   a required-test id that matched no JUnit case (exact id or id-prefix) are
+   MEASURED: recorded on the stage (`forge stage list`), printed as NOTES,
+   ledgered as a `stage-measured` event — never refused. The one measure that
+   still refuses is a delta above twice the declared line budget. Decision
+   records (`docs/decisions/`) never count as strays. A degraded window that
+   closed with at most five files, all inside the task's write scope, counts
+   as the stage's write launch when no Codex launch exists (recorded on the
+   stage as `host_window`). A review that finds blockers AFTER the stage closed reopens it for
    the fix with `forge task reopen <id> --review-fix` (base, contract and
    approval stand; only the stamp drops), then the same loop: delegate, commit,
    review, stage done.

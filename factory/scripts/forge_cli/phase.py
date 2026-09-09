@@ -560,9 +560,9 @@ def cmd_next(args: argparse.Namespace) -> None:
                         "clean round AND the plan is final — no pending edits): "
                         "the human reviews it THERE (not in chat) and approves; "
                         f"then record it: `./forge task approve {task_id} --by \"<name>\"`. "
-                        "The approval is REFUSED until the board has actually sent "
-                        "them this plan text, so the link is the step, not a "
-                        "courtesy. Do NOT approve after an intermediate grill — a "
+                        "`task approve` prints the board link again as a courtesy; "
+                        "it does not check that the plan was opened — you do. "
+                        "Do NOT approve after an intermediate grill — a "
                         "later edit re-stales the approval and forces another round."
                     )
                 elif frontier == "stage-start":
