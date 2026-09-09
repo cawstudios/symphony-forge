@@ -511,12 +511,13 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     story = state.get("issue_key") or state.get("story")
     if not isinstance(story, str) or not story:
         fail("review reject requires an active story")
-    resolved = _cite_resolves(base, story, cite)
+    resolved = _cite_resolves(base, story, cite, task_id)
     if not resolved:
         fail(f"--cite {cite!r} names nothing settled. A rejection cites a decision "
-             "record (its NNNN id under docs/decisions/), a plan contract id from "
-             "the recorded decomposition, or a `## ` section of the story plan; a "
-             "finding no settled text contradicts is a defect to fix, not to reject.")
+             "record (its NNNN id under docs/decisions/), a plan contract id of a "
+             "task whose stage is DONE (never this task's own or a pending task's), "
+             "or a `## ` section of the story plan; a finding no settled text "
+             "contradicts is a defect to fix, not to reject.")
     rel = f"reviews/{lens}.json"
     path = proof_path(base, story, rel, task_id=task_id)
     artifact = load_json(path, default={})
@@ -611,20 +612,25 @@ def _review_set_problem(base: Path, story: str, task_id: str) -> str:
     return ""
 
 
-def _cite_resolves(base: Path, story: str, cite: str) -> str:
+def _cite_resolves(base: Path, story: str, cite: str, task_id: str = "") -> str:
     """The settled text a rejection rests on, or '' when nothing matches.
 
     Accepted forms, any token of `cite` split on `;`, `,` or whitespace:
     a decision id (`0154`, `decision 0154`) with a record under docs/decisions/;
-    a plan contract id recorded in the decomposition (`T3b-AC3`); a `## `
-    section header of the story plan (`S4`, `Decisions`), matched as a whole
-    word inside the header."""
+    a plan contract id of a task whose stage is DONE (`T3b-AC3`) — never the
+    task under review's own contract nor a pending task's, which are not
+    settled; a `## ` section header of the story plan (`S4`, `Decisions`),
+    matched as a whole word inside the header."""
+    from .stages import load_stages
     tokens = [t.strip("`'\"() ") for t in re.split(r"[;,\s]+", cite or "") if t.strip()]
     decisions = base / "docs" / "decisions"
     decomposition = load_json(protected_decomposition_state_path(base), default={})
+    sealed = {s.get("id") for s in load_stages(base).get("stages", [])
+              if isinstance(s, dict) and s.get("status") == "done"}
     contract_ids = {
         str(c.get("id"))
         for t in decomposition.get("tasks") or [] if isinstance(t, dict)
+        if t.get("id") in sealed and t.get("id") != task_id
         for c in t.get("plan_contracts") or [] if isinstance(c, dict)
     }
     headers: list[str] = []

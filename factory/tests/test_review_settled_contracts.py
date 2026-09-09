@@ -217,7 +217,16 @@ def test_generic_plan_headers_do_not_resolve_a_citation(repo, tmp_path):
     _story(repo, tmp_path)
     plan = next((repo / "plans" / "active").glob("ENG-1-*.md"))
     plan.write_text(plan.read_text() + "\n## Risks\nnone\n\n## Owner rulings\n- S4 stays\n")
-    assert _cite_resolves(repo, "ENG-1", "Risks") == ""
-    assert _cite_resolves(repo, "ENG-1", "rulings") == "plan section 'Owner rulings'"
-    assert _cite_resolves(repo, "ENG-1", "T1-AC1") == "contract T1-AC1"
-    assert _cite_resolves(repo, "ENG-1", "c") == ""
+    assert _cite_resolves(repo, "ENG-1", "Risks", "T2") == ""
+    assert _cite_resolves(repo, "ENG-1", "rulings", "T2") == "plan section 'Owner rulings'"
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2") == "contract T1-AC1"
+    assert _cite_resolves(repo, "ENG-1", "c", "T2") == ""
+    # Only a SEALED task's contract is settled: not this task's own, not a
+    # pending task's, and not T1's once its stage is no longer done.
+    data = load_stages(repo)
+    data["stages"][1]["task_sha256"] = "def"
+    write_stages(repo, data)
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T1") == ""
+    data["stages"][0]["status"] = "pending"
+    write_stages(repo, data)
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2") == ""
