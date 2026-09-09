@@ -62,8 +62,8 @@ jobs:
       - name: Gate regression tests
         if: steps.repo_kind.outputs.is_harness == 'true'
         run: |
-          python3 -m pip install --quiet pytest pytest-xdist psutil
-          python3 -m pytest factory/tests -q -n auto --dist loadfile
+          python3 -m pip install --quiet pytest psutil
+          python3 -m pytest factory/tests -q
       # Scaffolds from THIS repo, so it inherits whatever .claude skills the repo
       # carries. In the harness that is just `forge`, whose canon lives in the
       # copied factory/ tree. A client's own skills point at repo-root skills/,

@@ -122,10 +122,6 @@ text). The doors check what enters; these mechanisms manage what accumulates:
   over 5MB fails, and `docs/context/`, `.gstack/`, `prototype/` have
   cumulative budgets with early warnings. The budget is the backstop for
   the categories nobody predicted.
-- **Gate regression suite**: `factory/tests/` (harness repo only) runs in CI
-  as `python3 -m pytest factory/tests -q -n auto --dist loadfile`
-  (pytest-xdist; every test owns its own temp repo, so the ~30-minute serial
-  run parallelises cleanly). Locally, `-n auto` is the same win.
 - **Ledger compaction**: `forge.py assumptions archive` moves resolved rows
   from finished tasks to `plans/assumptions-archive.md` at milestones;
   rejected skill proposals move to `factory/skills/rejected/` (the miner's
