@@ -272,3 +272,21 @@ def test_reject_refuses_a_citation_unrelated_to_the_finding(repo, tmp_path):
                     "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
                     "--by", "autoreview")
     assert code == 0 and "ledgered as a lesson for src/runtime/coordinator.ts" in out, out
+
+
+def test_a_later_lens_record_keeps_the_rejections_of_the_task(repo, tmp_path):
+    """The recorder is what `forge review` calls per lens; a fresh artifact for
+    the same task carries the earlier rejections (the review command copies
+    them in before recording), so the record of what was set aside survives."""
+    from forge_cli.review import LENSES as _lenses  # noqa: F401
+    _story(repo, tmp_path)
+    hard = {"category": "security", "area": "src/runtime", "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [hard])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code == 0, out
+    before = load_json(proof_path(repo, "ENG-1", "reviews/security.json", task_id="T2"),
+                       default={})
+    assert len(before["rejected_findings"]) == 1
+    assert before["rejected_findings"][0]["task_id"] == "T2"

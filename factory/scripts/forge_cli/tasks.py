@@ -546,7 +546,8 @@ def cmd_task_pr_ready(args: argparse.Namespace) -> None:
         # A PR for this branch may already exist (a retry after a push that
         # succeeded, or a re-seal): that is the ship, not a failure.
         existing = subprocess.run(
-            ["gh", "pr", "view", branch, "--json", "url", "--jq", ".url"]
+            ["gh", "pr", "view", branch, "--json", "url,state",
+             "--jq", 'select(.state == "OPEN") | .url']
             + (["--repo", slug] if slug and "/" in slug else []),
             cwd=base, capture_output=True, text=True, encoding="utf-8",
         )

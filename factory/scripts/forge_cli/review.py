@@ -821,6 +821,15 @@ def cmd_review(args: argparse.Namespace) -> None:
     for lens in lenses:
         artifact = _artifact(lens, task, reports[lens], scope, base_sha, tip_sha,
                              skills_used, all_tasks, started)
+        # A rejection is part of the task's review record: a later round must
+        # not erase it (the ledgered lesson keeps the reviewer from re-raising
+        # it; the artifact keeps the human able to see it was set aside).
+        previous = load_json(
+            proof_path(base, story, f"reviews/{lens}.json", task_id=args.id), default={})
+        carried = [r for r in previous.get("rejected_findings") or []
+                   if isinstance(r, dict) and r.get("task_id") == args.id]
+        if carried:
+            artifact["rejected_findings"] = carried
         payload = tmp / f"{lens}.artifact.json"
         payload.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
         proc = subprocess.run(
