@@ -40,6 +40,17 @@ with `generated_by: autoreview`:
 
 Never review inline in the coordinating session; never nest reviewers.
 
+The run is the task's ONLY review: with no blocking (P0/P1) finding it
+stamps the stage — bound to the reviewed tree — and `stage done` and
+`task pr-ready` seal on that stamp; non-blocking findings are recorded
+follow-ups and never lower the score below the seal floor. The brief carries
+what is settled (the story plan's decisions and rulings, the contracts of
+tasks already sealed, the lessons in force); a finding that contradicts
+settled text is rejected on the record with `forge review <id> --reject`,
+which requires a citation that resolves to a decision, a plan section or a
+sealed contract, ledgers it as a lesson, and stamps only when every lens is
+recorded for this task on the current diff with nothing blocking.
+
 ## Review findings are not a menu
 
 A finding the review just raised is work, and work goes to Codex. Delegate the

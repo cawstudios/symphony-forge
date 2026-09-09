@@ -403,27 +403,30 @@ sequence a JIT contract loop for every pending task:
 7. the orchestrator inspects the diff and rejects overbuilt code
 8. that stage's assumption rows are validated (`forge assumptions list --open`)
 9. smallest relevant checks run
-10. **local autoreview on the UNCOMMITTED diff until clean** (`autoreview
-   --mode local --max-priority P2`, run DIRECTLY by the orchestrator with the
-   autoreview skill — never as a Codex handoff, which re-triggers the same skill
-   one indirection deeper). P2, not P0-only: the review enforces the structure
-   and validation the contract demanded. Keep the implementation UNCOMMITTED
-   through this fix/review loop and commit ONCE when it is clean — committing
-   product code mid-loop stales the task grill (its grounding is contract + plan
-   + product tree) and the write `forge delegate` refuses until you `git reset
-   --mixed HEAD~1`. A review finding is ALWAYS fixed by re-delegating to Codex —
-   the orchestrator never stops to ask who fixes; this rule decides it. The ONE
-   exception: when a review-driven fix genuinely cannot be verified inside the
-   companion sandbox (needs a database/network/Docker it lacks), the orchestrator
-   opens a bounded degraded window (`forge mode degraded start --reason ...`,
-   allowed mid-stage), makes the MINIMAL host fix, logs it with `forge signal
-   raise --kind host-exception`, verifies host-side, and resumes — rather than
-   re-delegating an unverifiable guess.
-11. commit, then `forge stage done <id>`
+10. commit, then **`forge review <id>`** — ONE three-lens autoreview of the
+   task's own delta, run by Codex with the settled contracts in the brief. A
+   run with no blocking (P0/P1) finding STAMPS the stage, bound to that tree;
+   non-blocking findings are recorded follow-ups. A blocking finding is ALWAYS
+   fixed by re-delegating to Codex (`forge delegate <id>` — the stage is still
+   active), committed, and reviewed again; the orchestrator never stops to ask
+   who fixes. A finding that contradicts an accepted decision, a plan section or
+   a sealed contract is not a defect: `forge review <id> --reject "<text>"
+   --lens <l> --reason ... --cite <decision|contract|section> --by <agent>`
+   records the rejection, ledgers the contract as a lesson and stamps when no
+   lens blocks. The ONE exception to re-delegating: a fix that genuinely
+   cannot be verified inside the companion sandbox (needs a database/network/
+   Docker it lacks) — open a bounded degraded window (`forge mode degraded
+   start --reason ...`), make the MINIMAL host fix, log it with `forge signal
+   raise --kind host-exception`, verify host-side, and resume.
+11. `forge stage done <id>` — it seals on the review stamp and measures the
+   delta. A review that finds blockers AFTER the stage closed reopens it for
+   the fix with `forge task reopen <id> --review-fix` (base, contract and
+   approval stand; only the stamp drops), then the same loop: delegate, commit,
+   review, stage done.
 
 `forge next` derives this frontier from the same readiness gate and reports
 exactly one of author contract, task grill, stage start, delegate, or
-`await-merge`. **Per-task PRs are the standard:** after a task's local autoreview
+`await-merge`. **Per-task PRs are the standard:** after a task's review
 and `forge stage done`, ship it as its OWN PR — `forge task pr-ready <id>` (writes
 the marker, pushes, opens the PR, poll CI to green) — and let it merge to the
 trunk before the next task starts, never batching a whole story into one PR.
@@ -441,15 +444,16 @@ its marker to the trunk (via the reconcile PR) and the frontier advances. This
 is a reconcile, not a shortcut: it refuses when the work is not genuinely on the
 trunk, so it can never fabricate a ship.
 
-Per-stage local reviews are pre-commit hygiene and record nothing; the ONE
-branch-wide autoreview at the review phase remains the only review gate and
-sole producer of `.factory/reviews/*` (decision 0001 D6 unchanged — it
-catches cross-stage issues the local passes cannot see). `pr_ready.py`
-refuses while any stage is not done; `forge next` shows stage progress; the
-tracker archives to `.factory/history/<issue>/` at ship.
+There is ONE review per task. `forge review` produces `.factory/stories/<KEY>/
+reviews/*` and the stage's review stamp in the same run (decision 0001 D6:
+the recorded review is the only review gate); no separate stage-local review
+loop exists, and `record_review_from_json.py --aspect stage-local` remains
+only as a manual fallback. `pr_ready.py` refuses while any stage is not done
+or its stamp is stale; `forge next` shows stage progress; the tracker archives
+to `.factory/history/<issue>/` at ship.
 
-The loop is AUTONOMOUS between gates (conduct §7): a clean local review IS
-the permission to commit and start the next stage — the orchestrator never
+The loop is AUTONOMOUS between gates (conduct §7): a clean review IS
+the permission to close the stage and ship the task — the orchestrator never
 pauses to ask "proceed?" after a review or between stages, and the same
 holds across phase transitions (verify → review → functional → pr_ready).
 It stops only for an open signal, a gate refusal it cannot resolve within

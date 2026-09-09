@@ -434,8 +434,9 @@ def cmd_task_reopen(args: argparse.Namespace) -> None:
         write_stages(base, data)
         print(f"Reopened {args.id} -> active for a review fix (round "
               f"{target['review_fix_count']}): base, contract and plan approval "
-              "stand. Delegate the fixes, record a fresh stage-local review stamp, "
-              f"then `forge stage done {args.id}` and `forge review {args.id}`.")
+              f"stand. Delegate the fixes, commit, `forge review {args.id}` (a run "
+              "with no blocking finding stamps the stage), then "
+              f"`forge stage done {args.id}` and `forge task pr-ready {args.id}`.")
         return
     # Reopening ripples forward: the done-tail built on this task has a changed
     # base, so it returns to pending too. Clear the evidence so every reopened

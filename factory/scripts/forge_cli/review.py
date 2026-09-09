@@ -343,6 +343,7 @@ def _artifact(
     ).strip()[:3000]
     artifact = {
         "generated_by": "autoreview",
+        "task_id": task.get("id"),
         "score": _score(len(blocking), len(non_blocking)),
         "summary": summary,
         "blocking_findings": [_structured(f) for f in blocking],
@@ -509,11 +510,20 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     story = state.get("issue_key") or state.get("story")
     if not isinstance(story, str) or not story:
         fail("review reject requires an active story")
+    resolved = _cite_resolves(base, story, cite)
+    if not resolved:
+        fail(f"--cite {cite!r} names nothing settled. A rejection cites a decision "
+             "record (its NNNN id under docs/decisions/), a plan contract id from "
+             "the recorded decomposition, or a `## ` section of the story plan; a "
+             "finding no settled text contradicts is a defect to fix, not to reject.")
     rel = f"reviews/{lens}.json"
     path = evidence_path(base, story, rel)
     artifact = load_json(path, default={})
     if not artifact:
         fail(f"no recorded {lens} review for {story}")
+    if artifact.get("task_id") not in (None, task_id):
+        fail(f"the recorded {lens} review belongs to task {artifact.get('task_id')}, "
+             f"not {task_id}; rerun `forge review {task_id}` first")
     needle = match.strip().lower()
     hits = [f for f in artifact.get("blocking_findings") or []
             if needle in json.dumps(f).lower()]
@@ -553,23 +563,80 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
                for l in existing):
         record_id = f"{at.replace(':', '').replace('-', '')}-{lesson['topic']}"
         append_ledger_record(lessons_path(base), lesson, record_id)
-    remaining = 0
-    for other in LENSES:
-        recorded = load_json(evidence_path(base, story, f"reviews/{other}.json"),
-                             default={})
-        remaining += len(recorded.get("blocking_findings") or []) if recorded else 0
+    print(f"Rejected {lens} finding: {summary}\n  reason: {reason.strip()}\n  "
+          f"cite: {resolved}\n  ledgered as a lesson for {', '.join(applies_to)}")
+    # A rejection only ever REMOVES one finding; it stamps the stage only when
+    # the review set is complete and current — every lens recorded for THIS
+    # task on THIS branch diff — so a lone lens or a stale run cannot seal.
+    problem = _review_set_problem(base, story, task_id)
     stage = next((s for s in load_stages(base).get("stages", [])
                   if s.get("id") == task_id), {})
-    print(f"Rejected {lens} finding: {summary}\n  reason: {reason.strip()}\n  "
-          f"cite: {cite.strip()}\n  ledgered as a lesson for {', '.join(applies_to)}")
-    if remaining:
-        print(f"{remaining} blocking finding(s) remain across the lenses.")
+    if problem:
+        print(f"No stamp: {problem}")
     elif stage.get("status") in ("active", "done"):
         stamp_stage_review(base, task_id, lenses=LENSES)
         print(f"No lens blocks any more; stage {task_id} review stamp recorded. "
               + ("`./forge stage done` then " if stage.get("status") == "active" else "")
               + f"`./forge task pr-ready {task_id}`.")
     return artifact
+
+
+def _review_set_problem(base: Path, story: str, task_id: str) -> str:
+    """Why the recorded lens artifacts cannot seal `task_id` right now — empty
+    when every lens is recorded for this task against the current branch diff
+    with no blocking finding left."""
+    from factory_lib import branch_diff_digest
+    current = branch_diff_digest(base)
+    for lens in LENSES:
+        recorded = load_json(evidence_path(base, story, f"reviews/{lens}.json"),
+                             default={})
+        if not recorded:
+            return f"the {lens} lens is not recorded; run `forge review {task_id}`"
+        if recorded.get("task_id") != task_id:
+            return (f"the {lens} lens was recorded for "
+                    f"{recorded.get('task_id') or 'an earlier task'}; run "
+                    f"`forge review {task_id}`")
+        if recorded.get("branch_diff_digest") != current:
+            return (f"the {lens} lens predates the current branch diff; run "
+                    f"`forge review {task_id}` on this tree")
+        if recorded.get("blocking_findings"):
+            return (f"{len(recorded['blocking_findings'])} blocking {lens} "
+                    "finding(s) remain")
+    return ""
+
+
+def _cite_resolves(base: Path, story: str, cite: str) -> str:
+    """The settled text a rejection rests on, or '' when nothing matches.
+
+    Accepted forms, any token of `cite` split on `;`, `,` or whitespace:
+    a decision id (`0154`, `decision 0154`) with a record under docs/decisions/;
+    a plan contract id recorded in the decomposition (`T3b-AC3`); a `## `
+    section header of the story plan (`S4`, `Decisions`), matched as a whole
+    word inside the header."""
+    tokens = [t.strip("`'\"() ") for t in re.split(r"[;,\s]+", cite or "") if t.strip()]
+    decisions = base / "docs" / "decisions"
+    decomposition = load_json(protected_decomposition_state_path(base), default={})
+    contract_ids = {
+        str(c.get("id"))
+        for t in decomposition.get("tasks") or [] if isinstance(t, dict)
+        for c in t.get("plan_contracts") or [] if isinstance(c, dict)
+    }
+    headers: list[str] = []
+    for plan in sorted((base / "plans" / "active").glob(f"{story}-*.md"))[:1]:
+        try:
+            headers = [ln[3:].strip() for ln in plan.read_text(encoding="utf-8").splitlines()
+                       if ln.startswith("## ")]
+        except OSError:
+            headers = []
+    for token in tokens:
+        if re.fullmatch(r"\d{4}", token) and any(decisions.glob(f"{token}-*.md")):
+            return f"decision {token}"
+        if token in contract_ids:
+            return f"contract {token}"
+        for header in headers:
+            if re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", header, re.I):
+                return f"plan section '{header}'"
+    return ""
 
 
 def cmd_review(args: argparse.Namespace) -> None:

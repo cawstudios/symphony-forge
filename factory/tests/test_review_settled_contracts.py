@@ -82,11 +82,12 @@ def test_brief_carries_plan_decisions_and_sealed_contracts(repo, tmp_path):
     assert "T1-AC1" not in "\n".join(_task_section(task, repo))
 
 
-def _record_lens(repo, lens: str, blocking: list[dict]) -> None:
+def _record_lens(repo, lens: str, blocking: list[dict], task_id: str = "T2") -> None:
     code, out = run(repo, "forge.py", "review-brief", "--all")
     assert code == 0, out
     payload = {
-        "generated_by": "autoreview", "score": 10 - 3 * len(blocking),
+        "generated_by": "autoreview", "task_id": task_id,
+        "score": 10 - 3 * len(blocking),
         "summary": f"{lens} lens", "blocking_findings": blocking,
         "non_blocking_findings": [], "recommendation": "request-changes" if blocking else "approve",
         "skills_used": ["review-animations"],
@@ -109,23 +110,61 @@ def test_reject_moves_the_finding_ledgers_a_lesson_and_stamps_when_clean(repo, t
     _record_lens(repo, "performance", [])
 
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
-                    "--lens", "security", "--reason", "T3b-AC3 keys the consult on the rail case",
-                    "--cite", "T3b-AC3; story S4", "--by", "autoreview")
+                    "--lens", "security", "--reason", "T1-AC1 keys the consult on the rail case",
+                    "--cite", "T1-AC1; story S4", "--by", "autoreview")
     assert code == 0 and "Rejected security finding" in out, out
     recorded = load_json(evidence_path(repo, "ENG-1", "reviews/security.json"), default={})
     assert recorded["blocking_findings"] == []
     assert recorded["rejected_findings"][0]["finding"] == hard
-    assert recorded["rejected_findings"][0]["cite"] == "T3b-AC3; story S4"
+    assert recorded["rejected_findings"][0]["cite"] == "T1-AC1; story S4"
     assert recorded["score"] == 10 and recorded["recommendation"] == "approve"
     lessons = load_lessons(repo)
-    assert any("T3b-AC3" in l.get("lesson", "") and l.get("applies_to") == ["src/runtime/**"]
+    assert any("T1-AC1" in l.get("lesson", "") and l.get("applies_to") == ["src/runtime/**"]
                for l in lessons)
     assert "review stamp recorded" in out
     stamp = next(s for s in load_stages(repo)["stages"] if s["id"] == "T2")["local_review_stamp"]
     assert stamp["lenses"] == list(LENSES)
 
 
-def test_reject_refuses_without_a_citation_or_with_an_ambiguous_match(repo, tmp_path):
+def test_reject_refuses_a_citation_that_names_nothing_settled(repo, tmp_path):
+    _story(repo, tmp_path)
+    hard = {"category": "security", "area": "src/runtime", "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [hard])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "c", "--by", "autoreview")
+    assert code != 0 and "names nothing settled" in out, out
+    recorded = load_json(evidence_path(repo, "ENG-1", "reviews/security.json"), default={})
+    assert recorded["blocking_findings"] == [hard]
+    # A decision id resolves; so does a plan section header word.
+    (repo / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
+    (repo / "docs" / "decisions" / "0154-generic-scope.md").write_text("# 0154\n")
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "decision 0154",
+                    "--by", "autoreview")
+    assert code == 0 and "cite: decision 0154" in out, out
+
+
+def test_reject_never_stamps_from_an_incomplete_or_stale_review_set(repo, tmp_path):
+    _story(repo, tmp_path)
+    hard = {"category": "security", "area": "src/runtime", "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [hard])          # the other two lenses never ran
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code == 0 and "No stamp: the quality lens is not recorded" in out, out
+    assert "local_review_stamp" not in next(
+        s for s in load_stages(repo)["stages"] if s["id"] == "T2")
+    # A lens recorded for another task cannot seal this one either.
+    _record_lens(repo, "quality", [], task_id="T1")
+    _record_lens(repo, "performance", [])
+    _record_lens(repo, "security", [hard])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code == 0 and "No stamp: the quality lens was recorded for T1" in out, out
+
+
+def test_reject_refuses_an_ambiguous_or_missing_match(repo, tmp_path):
     _story(repo, tmp_path)
     _record_lens(repo, "quality", [
         {"category": "x", "area": "src", "summary": "one hardFloor thing"},
@@ -135,8 +174,8 @@ def test_reject_refuses_without_a_citation_or_with_an_ambiguous_match(repo, tmp_
                     "--lens", "quality", "--reason", "r", "--by", "autoreview")
     assert code != 0 and "--cite" in out, out
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
-                    "--lens", "quality", "--reason", "r", "--cite", "c", "--by", "autoreview")
+                    "--lens", "quality", "--reason", "r", "--cite", "T1-AC1", "--by", "autoreview")
     assert code != 0 and "2 blocking quality findings match" in out, out
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "nothing-like-this",
-                    "--lens", "quality", "--reason", "r", "--cite", "c", "--by", "autoreview")
+                    "--lens", "quality", "--reason", "r", "--cite", "T1-AC1", "--by", "autoreview")
     assert code != 0 and "no blocking quality finding matches" in out, out
