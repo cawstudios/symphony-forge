@@ -209,9 +209,39 @@ def _structured(finding: dict) -> dict:
 
 def _score(blocking: int, non_blocking: int) -> int:
     # A documented heuristic, not a judgement: each blocking finding costs 3,
-    # each non-blocking half a point; a clean review is 10. The recorded
-    # findings carry the real content; the human reads those.
-    return max(0, int(10 - 3 * blocking - 0.5 * non_blocking))
+    # each non-blocking half a point but never more than two in total, so a
+    # review with no blocking finding scores at least 8 — the seal floor. P2
+    # findings are follow-ups, not a reason to refuse a task (five of them once
+    # sank a clean review to 7 and blocked pr-ready). The recorded findings
+    # carry the real content; the human reads those.
+    return max(0, int(10 - 3 * blocking - min(2.0, 0.5 * non_blocking)))
+
+
+def _next_hint(task_id: str, stage_status: str, blocking: int, caveats: int) -> str:
+    """The one instruction after a review. Blocking findings go back to Codex;
+    a done stage reopens for the fix first (delegate writes only inside an
+    active stage); a clean run has already stamped the stage."""
+    if blocking:
+        reopen = (f"`./forge task reopen {task_id} --review-fix`, then "
+                  if stage_status == "done" else "")
+        return (f"NEXT: {blocking} blocking finding(s) — {reopen}delegate the fixes "
+                f"to Codex (`./forge delegate {task_id}`), commit, rerun "
+                f"`./forge review {task_id}`. Loop until no lens blocks. Do this "
+                "WITHOUT asking the human to choose: a blocking finding cannot be "
+                "deferred or shipped past (pr-ready refuses it). A finding that "
+                "contradicts an accepted contract is not a defect: record the "
+                "contract as a lesson (`./forge lesson add`) so the next round "
+                "carries it. Host-side fixing is the single exception, and only "
+                "when the defect cannot be reproduced or fixed inside the Codex "
+                "sandbox — then open a ledgered degraded window and say why.")
+    seal = (f"`./forge stage done {task_id}` then `./forge task pr-ready {task_id}`"
+            if stage_status == "active" else f"`./forge task pr-ready {task_id}`")
+    if caveats:
+        return (f"NEXT: no blocking finding; {caveats} non-blocking finding(s) "
+                "recorded as follow-ups. The stage is stamped — " + seal + ". Fix a "
+                "follow-up in this task only when it is cheap and in scope; "
+                "otherwise `./forge defer` it with a revisit trigger.")
+    return "NEXT: all lenses clean; the stage is stamped — " + seal + "."
 
 
 def _recommendation(blocking: int, non_blocking: int) -> str:
@@ -568,30 +598,20 @@ def cmd_review(args: argparse.Namespace) -> None:
               f"non-blocking={len(artifact['non_blocking_findings'])}")
     print(f"Recorded {len(outcome)} review artifact(s) for {args.id} under "
           f".factory/stories/{story}/reviews/.")
+    # ONE review per task: a run with no blocking finding is the stage's review
+    # stamp as well (bound to this exact tree), so `stage done` and
+    # `task pr-ready` seal on it; no separate stage-local autoreview loop.
+    if not blocking_total and len(lenses) == len(LENSES):
+        from .stages import stamp_stage_review
+        stamp_stage_review(base, args.id, lenses=lenses)
+        print(f"Stage {args.id} review stamp recorded (tree "
+              f"{tip_sha[:12]}; {len(lenses)} lenses).")
+    elif not blocking_total:
+        print(f"NOTE: a single-lens run does not stamp the stage; run all lenses "
+              f"(`./forge review {args.id}`) for the seal.")
     # These are instructions, not options. A coordinator that turns a review
     # finding into a menu for the human ("fix now / ship and defer / fix it
     # myself") is asking them to arbitrate something the harness has already
     # decided: fixing a finding the review just raised is the work, and it goes
     # to Codex like every other write.
-    if blocking_total:
-        print(f"NEXT: {blocking_total} blocking finding(s) — reopen the stage for "
-              f"the fix (`./forge task reopen {args.id} --review-fix`; delegate "
-              "writes only inside an active stage), delegate the fixes to Codex "
-              f"(`./forge delegate {args.id}`), commit, record a fresh stage-local "
-              f"review stamp, `./forge stage done {args.id}`, then rerun "
-              f"`./forge review {args.id}`. Loop until every lens is clean. "
-              "Do this WITHOUT asking the human to choose: a blocking finding "
-              "cannot be deferred or shipped past (pr-ready refuses it), so "
-              "there is no decision to put to them. Host-side fixing is the "
-              "single exception, and only when the defect cannot be reproduced "
-              "or fixed inside the Codex sandbox — then open a ledgered "
-              "degraded window and say why.")
-    elif caveats_total:
-        print(f"NEXT: {caveats_total} non-blocking finding(s) — delegate the fixes "
-              f"to Codex (`./forge delegate {args.id}`) and rerun "
-              f"`./forge review {args.id}`; that is the default, and it does not "
-              "need the human's permission. Defer one ONLY when it is genuinely "
-              "outside this task's scope, with a reason and a revisit trigger "
-              f"(`./forge defer`). Then `./forge task pr-ready {args.id}`.")
-    else:
-        print(f"NEXT: all lenses clean — `./forge task pr-ready {args.id}`.")
+    print(_next_hint(args.id, str(started.get(args.id)), blocking_total, caveats_total))

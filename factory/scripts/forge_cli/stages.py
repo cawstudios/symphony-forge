@@ -822,17 +822,52 @@ def stage_review_binding(base: Path, stage: dict, task: dict) -> dict[str, str]:
     }
 
 
+def stamp_stage_review(base: Path, stage_id: str, *, generated_by: str = "autoreview",
+                       lenses: tuple[str, ...] | list[str] = ()) -> dict:
+    """Bind a clean review to the stage's current product tree.
+
+    `forge review` calls this when no lens reports a blocking finding, so ONE
+    review per task both records the lens artifacts and satisfies the stage
+    seal; the separate stage-local autoreview loop is no longer required. An
+    active stage is stamped ahead of `stage done`; a done stage is stamped so
+    `task pr-ready` seals the reviewed tree. Returns the stamp."""
+    from .delegate import delegation_exclusion
+    with delegation_exclusion(base, "stages", kind="stage-state", namespace="state"):
+        data = load_stages(base)
+        stage = _find(data, stage_id)
+        if stage.get("status") not in ("active", "done"):
+            fail(f"{stage_id} is {stage.get('status', 'pending')!r}; only an active "
+                 "or done stage takes a review stamp")
+        task = task_for(base, stage_id)
+        if not task:
+            fail(f"{stage_id} has no recorded task contract to bind the review to")
+        stamp = {
+            **stage_review_binding(base, stage, task),
+            "recorded_at": now_iso(),
+            "generated_by": generated_by,
+            "lenses": list(lenses),
+        }
+        stage["local_review_stamp"] = stamp
+        write_stages(base, data)
+    append_event(base, "review-stage-local", actor=generated_by,
+                 story=data.get("issue", ""), detail=stage_id)
+    return stamp
+
+
 def _require_reviewed_commit(base: Path, stage: dict, task: dict) -> None:
     stamp = stage.get("local_review_stamp")
     expected = stage_review_binding(base, stage, task)
+    stage_id = stage.get("id")
     if not isinstance(stamp, dict):
-        fail(f"{stage.get('id')} has no stage-local review stamp. Record a clean "
-             "local review before committing, then retry stage completion.")
+        fail(f"{stage_id} has no review stamp. Run `forge review {stage_id}` on the "
+             "committed tree — a run with no blocking finding stamps the stage — "
+             "then retry.")
     stale = [key for key, value in expected.items() if stamp.get(key) != value]
     if stale:
-        fail(f"{stage.get('id')} has a STALE stage-local review stamp "
-             f"({', '.join(stale)} changed). Re-run the local review against "
-             "the final staged product tree, commit exactly that tree, then retry.")
+        fail(f"{stage_id} has a STALE review stamp ({', '.join(stale)} changed). "
+             f"Commit the final tree and rerun `forge review {stage_id}` "
+             "(a done stage: `forge task reopen "
+             f"{stage_id} --review-fix` first when fixes are still to land), then retry.")
     product_dirt = sorted(product_tree_snapshot(base)["dirty"])
     if product_dirt:
         fail(f"{stage.get('id')} has uncommitted or staged PRODUCT changes: "
