@@ -521,9 +521,12 @@ def cmd_task_pr_ready(args: argparse.Namespace) -> None:
             "Install GitHub CLI, run `gh auth login`, then retry to open the PR."
         )
     title = f"{key} {args.id}: {task.get('title', '').strip()}".rstrip(": ")
+    from .review import rejected_findings_report
+    rejected = rejected_findings_report(base, key, args.id)
     body = (
         f"Task marker: {marker.as_posix()}\n\n"
         f"Sealed commit: {commit}\n"
+        + (f"\n{rejected}" if rejected else "")
     )
     # Resolve owner/repo from origin so `gh` targets THIS repo — a bare
     # `gh pr create` can resolve a PR number against the wrong repo when a
@@ -540,6 +543,18 @@ def cmd_task_pr_ready(args: argparse.Namespace) -> None:
     )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip()
+        # A PR for this branch may already exist (a retry after a push that
+        # succeeded, or a re-seal): that is the ship, not a failure.
+        existing = subprocess.run(
+            ["gh", "pr", "view", branch, "--json", "url", "--jq", ".url"]
+            + (["--repo", slug] if slug and "/" in slug else []),
+            cwd=base, capture_output=True, text=True, encoding="utf-8",
+        )
+        url = existing.stdout.strip() if existing.returncode == 0 else ""
+        if url:
+            print(f"Task {args.id} PR ready: {marker.as_posix()}")
+            print(f"PR already open for {branch}: {url}")
+            return
         fail(
             f"task {args.id} is sealed at {marker.as_posix()}, but opening the PR "
             f"to {default_branch} failed{f': {detail}' if detail else ''}. "

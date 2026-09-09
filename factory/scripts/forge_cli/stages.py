@@ -854,6 +854,22 @@ def stamp_stage_review(base: Path, stage_id: str, *, generated_by: str = "autore
     return stamp
 
 
+def revoke_stage_review_stamp(base: Path, stage_id: str) -> bool:
+    """Drop a stage's review stamp because a later review blocks; True when
+    a stamp was there. The seal follows the latest verdict, not the first."""
+    from .delegate import delegation_exclusion
+    with delegation_exclusion(base, "stages", kind="stage-state", namespace="state"):
+        data = load_stages(base)
+        stage = _find(data, stage_id)
+        had = stage.pop("local_review_stamp", None) is not None
+        if had:
+            write_stages(base, data)
+    if had:
+        append_event(base, "review-stamp-revoked", actor="autoreview",
+                     story=data.get("issue", ""), detail=stage_id)
+    return had
+
+
 def _require_reviewed_commit(base: Path, stage: dict, task: dict) -> None:
     stamp = stage.get("local_review_stamp")
     expected = stage_review_binding(base, stage, task)

@@ -589,6 +589,31 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     return artifact
 
 
+def rejected_findings_report(base: Path, story: str, task_id: str) -> str:
+    """Markdown for the PR body: every finding the task's review rejected on a
+    citation, so the human merging sees what was set aside and why. A
+    rejection is the coordinator's call; this is where a person checks it."""
+    lines: list[str] = []
+    for lens in LENSES:
+        recorded = load_json(
+            proof_path(base, story, f"reviews/{lens}.json", task_id=task_id), default={})
+        for entry in recorded.get("rejected_findings") or []:
+            if not isinstance(entry, dict):
+                continue
+            finding = entry.get("finding") or {}
+            summary = (str(finding.get("summary", "")) if isinstance(finding, dict)
+                       else str(finding)).strip()
+            lines.append(f"- **{lens}**: {summary}\n  - rejected because: "
+                         f"{str(entry.get('reason', '')).strip()}\n  - cites: "
+                         f"{str(entry.get('cite', '')).strip()}")
+    if not lines:
+        return ""
+    return ("## Review findings rejected on a citation\n\n"
+            "The reviewer raised these as blocking; the coordinator set them aside "
+            "as contradicting settled text. Check the citation before merging.\n\n"
+            + "\n".join(lines) + "\n")
+
+
 def _review_set_problem(base: Path, story: str, task_id: str) -> str:
     """Why the recorded lens artifacts cannot seal `task_id` right now — empty
     when every lens is recorded for this task against the current branch diff
@@ -792,6 +817,12 @@ def cmd_review(args: argparse.Namespace) -> None:
     elif not blocking_total:
         print(f"NOTE: a single-lens run does not stamp the stage; run all lenses "
               f"(`./forge review {args.id}`) for the seal.")
+    else:
+        # A blocking review on a tree an earlier run stamped clean revokes that
+        # stamp: the seal must reflect the latest verdict, not the first.
+        from .stages import revoke_stage_review_stamp
+        if revoke_stage_review_stamp(base, args.id):
+            print(f"Stage {args.id}'s earlier review stamp revoked: this run blocks.")
     # These are instructions, not options. A coordinator that turns a review
     # finding into a menu for the human ("fix now / ship and defer / fix it
     # myself") is asking them to arbitrate something the harness has already

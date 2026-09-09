@@ -23,7 +23,7 @@ from factory_lib import (  # noqa: E402
 )
 from forge_cli.findings import _finding_rows  # noqa: E402
 from forge_cli.lessons import load_lessons  # noqa: E402
-from forge_cli.review import LENSES  # noqa: E402
+from forge_cli.review import LENSES, rejected_findings_report  # noqa: E402
 from forge_cli.review_brief import _plan_section_bodies, _task_section  # noqa: E402
 from forge_cli.stages import load_stages  # noqa: E402
 
@@ -230,3 +230,19 @@ def test_generic_plan_headers_do_not_resolve_a_citation(repo, tmp_path):
     data["stages"][0]["status"] = "pending"
     write_stages(repo, data)
     assert _cite_resolves(repo, "ENG-1", "T1-AC1", "T2") == ""
+
+
+def test_rejected_findings_report_lists_each_rejection_for_the_pr_body(repo, tmp_path):
+    _story(repo, tmp_path)
+    assert rejected_findings_report(repo, "ENG-1", "T2") == ""
+    hard = {"category": "security", "area": "src/runtime", "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [hard])
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "the rail case keys the consult",
+                    "--cite", "T1-AC1", "--by", "autoreview")
+    assert code == 0, out
+    report = rejected_findings_report(repo, "ENG-1", "T2")
+    assert "## Review findings rejected on a citation" in report
+    assert "- **security**: hardFloor thing" in report
+    assert "rejected because: the rail case keys the consult" in report
+    assert "cites: T1-AC1" in report

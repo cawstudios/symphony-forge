@@ -17,7 +17,9 @@ from test_gates import (  # noqa: I001 — test_gates puts factory/scripts on sy
 )
 from forge_cli.readiness import MIN_SCORE, review_passed  # noqa: E402
 from forge_cli.review import _next_hint, _score  # noqa: E402
-from forge_cli.stages import load_stages, stamp_stage_review  # noqa: E402
+from forge_cli.stages import (  # noqa: E402
+    load_stages, revoke_stage_review_stamp, stamp_stage_review,
+)
 
 __all__ = ["repo"]
 
@@ -96,3 +98,12 @@ def test_stamp_refuses_a_pending_stage(repo, tmp_path, capsys):
     else:
         raise AssertionError("a pending stage took a review stamp")
     assert "local_review_stamp" not in _stage(repo, "T1")
+
+
+def test_a_blocking_review_revokes_an_earlier_clean_stamp(repo, tmp_path):
+    _story_with_stage(repo, tmp_path, "active")
+    stamp_stage_review(repo, "T1", lenses=("quality", "performance", "security"))
+    assert "local_review_stamp" in _stage(repo, "T1")
+    assert revoke_stage_review_stamp(repo, "T1") is True
+    assert "local_review_stamp" not in _stage(repo, "T1")
+    assert revoke_stage_review_stamp(repo, "T1") is False
