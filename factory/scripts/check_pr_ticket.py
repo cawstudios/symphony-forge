@@ -103,19 +103,29 @@ def roadmap_at(root: Path, ref: str) -> dict[str, dict]:
     }
 
 
-def added_paths(root: Path, base: str) -> set[str]:
+def _added_in(lines: str) -> set[str]:
     added: set[str] = set()
-    for line in git_paths(
-        root, "diff", "--name-status", f"{base}..HEAD",
-    ).splitlines():
+    for line in lines.splitlines():
         fields = line.split("\t")
-        if len(fields) < 2:
-            continue
-        status = fields[0]
-        path = fields[-1]
-        if status == "A":
-            added.add(path)
+        if len(fields) >= 2 and fields[0] == "A":
+            added.add(fields[-1])
     return added
+
+
+def added_paths(root: Path, base: str) -> set[str]:
+    """Paths this PR's OWN commits added: new at HEAD relative to `base` AND
+    introduced by a first-parent, non-merge commit in base..HEAD.
+
+    A merge commit is something the branch RECEIVED — the trunk merged in,
+    carrying every work record the trunk completed meanwhile. Those records
+    are not this PR's to declare, so a tree diff alone (which attributes them
+    to the branch) reported them as "undeclared"."""
+    in_tree = _added_in(git_paths(root, "diff", "--name-status", f"{base}..HEAD"))
+    own = _added_in(git_paths(
+        root, "log", "--first-parent", "--no-merges", "--format=",
+        "--name-status", "--diff-filter=A", f"{base}..HEAD",
+    ))
+    return in_tree & own
 
 
 def changed_paths(root: Path, base: str) -> set[str]:
