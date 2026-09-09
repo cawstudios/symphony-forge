@@ -203,6 +203,23 @@ def test_stage_start_waits_on_dependencies_not_list_order(repo, tmp_path):
     assert code != 0 and "T2 waits on unfinished dependency task(s): T1" in out, out
 
 
+def test_one_checkout_runs_one_stage_even_with_disjoint_scopes(repo, tmp_path):
+    """Parallel means a different worktree: the same two tasks that start side
+    by side in two worktrees (test above) are refused in one checkout."""
+    sign_off(repo)
+    intake(repo)
+    save_plan(repo, tmp_path)
+    record_skeleton_then_frontier(
+        repo, [T1, skeletal_stage_task("T2"), {**skeletal_stage_task("T3"), "dependencies": ["T1"]}])
+    data = load_stages(repo)
+    data["stages"][0]["status"] = "done"
+    data["stages"][1]["status"] = "active"
+    write_stages(repo, data)
+    code, out = run(repo, "forge.py", "stage", "start", "T3", "--trunk")
+    assert code != 0 and f"worktree {repo} already runs T2" in out, out
+    assert "forge task start T3" in out
+
+
 def test_legacy_single_file_story_snapshot_is_still_read_then_replaced(repo):
     story = repo / ".factory" / "stories" / "OLD-1"
     story.mkdir(parents=True)
@@ -253,7 +270,7 @@ def _linked_worktree(repo: Path, name: str, task_id: str) -> Path:
     return worktree
 
 
-def test_task_worktree_first_write_migrates_every_legacy_record(repo):
+def test_task_worktree_writes_only_its_record_and_readers_merge_the_legacy_file(repo):
     worktree = _linked_worktree(repo, "OLD-1-T2", "T2")
     story = worktree / ".factory" / "stories" / "OLD-1"
     story.mkdir(parents=True)
@@ -263,7 +280,8 @@ def test_task_worktree_first_write_migrates_every_legacy_record(repo):
     (story / "stages.json").write_text(json.dumps({"issue": "OLD-1", "stages": legacy}))
     write_stages(worktree, {"issue": "OLD-1", "stages": [
         legacy[0], {**legacy[1], "status": "active"}, legacy[2]]})
-    assert not (story / "stages.json").exists()
+    assert (story / "stages.json").is_file(), "a task worktree never splits the legacy file"
+    assert [p.name for p in (story / "stages").glob("*.json")] == ["T2.json"]
     assert [(s["id"], s["status"]) for s in load_story_stages(worktree, "OLD-1")["stages"]] == [
         ("T1", "done"), ("T2", "active"), ("T3", "pending")]
 
@@ -285,7 +303,7 @@ def test_scope_change_names_root_level_files_too():
     assert _named_paths("no files named here", []) == []
 
 
-def test_two_task_worktrees_migrate_the_same_legacy_snapshot_identically(repo):
+def test_two_task_worktrees_each_add_only_their_own_record(repo):
     legacy = {"issue": "OLD-1", "stages": [
         {"id": "T1", "title": "a", "status": "done", "base_sha": "abc"},
         {"id": "T2", "title": "b", "status": "pending"},
@@ -303,7 +321,15 @@ def test_two_task_worktrees_migrate_the_same_legacy_snapshot_identically(repo):
         trees[task_id] = story / "stages"
     records = lambda tree: {p.name: p.read_bytes() for p in tree.glob("*.json")}  # noqa: E731
     a, b = records(trees["T2"]), records(trees["T3"])
-    assert set(a) == set(b) == {"T1.json", "T2.json", "T3.json"}
-    assert a["T1.json"] == b["T1.json"]  # sibling copied verbatim on both
-    assert json.loads(a["T2.json"])["status"] == "active" and json.loads(b["T2.json"])["status"] == "pending"
-    assert json.loads(b["T3.json"])["status"] == "active" and json.loads(a["T3.json"])["status"] == "pending"
+    assert set(a) == {"T2.json"} and set(b) == {"T3.json"}  # no sibling files
+    assert json.loads(a["T2.json"])["status"] == "active"
+    assert json.loads(b["T3.json"])["status"] == "active"
+    for tree in trees.values():
+        assert (tree.parent / "stages.json").is_file()  # legacy left for the story side
+    # The story worktree (no task_id) performs the one full split.
+    story = repo / ".factory" / "stories" / "OLD-1"
+    story.mkdir(parents=True)
+    (story / "stages.json").write_text(json.dumps(legacy))
+    write_stages(repo, legacy)
+    assert not (story / "stages.json").exists()
+    assert sorted(p.name for p in (story / "stages").glob("*.json")) == ["T1.json", "T2.json", "T3.json"]

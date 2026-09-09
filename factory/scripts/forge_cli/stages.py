@@ -153,15 +153,15 @@ def story_stage_records_dir(base: Path, issue: str) -> Path:
 def _write_story_records(base: Path, issue: str, stages: list[dict],
                          only: str = "") -> None:
     records = story_stage_records_dir(base, issue)
-    # The single-file snapshot this layout replaces: split it whole on the
-    # first write — a task worktree writing only its own record must not
-    # leave the other stages behind in a file the loader no longer reads.
+    # The single-file snapshot this layout replaces is split ONCE, from the
+    # story (trunk-side) worktree. A task worktree writes only its own record
+    # and leaves the legacy file alone — `load_story_stages` merges the two
+    # layouts until the split — so no sibling's record is ever written from a
+    # task branch.
     legacy = story_dir(base, issue) / "stages.json"
-    if legacy.is_file():
+    if not only and legacy.is_file():
         for stage in load_json(legacy, default={}).get("stages") or []:
             stage_id = stage.get("id") if isinstance(stage, dict) else None
-            # Verbatim, no timestamps: two branches splitting the same file
-            # produce byte-identical sibling records that merge cleanly.
             if isinstance(stage_id, str) and Path(stage_id).name == stage_id \
                     and not (records / f"{stage_id}.json").is_file():
                 dump_json(records / f"{stage_id}.json", stage)
@@ -180,8 +180,14 @@ def _write_story_records(base: Path, issue: str, stages: list[dict],
 def load_story_stages(base: Path, issue: str) -> dict:
     """The committed per-story snapshot, whichever layout wrote it."""
     records = story_stage_records_dir(base, issue)
+    legacy = load_json(story_dir(base, issue) / "stages.json", default={})
     if records.is_dir():
         stages = [load_json(path, default={}) for path in sorted(records.glob("*.json"))]
+        # Both layouts at once (a task worktree before the story-side split):
+        # a per-task record wins for its id, the legacy file covers the rest.
+        recorded = {s.get("id") for s in stages if isinstance(s, dict)}
+        stages += [s for s in legacy.get("stages") or []
+                   if isinstance(s, dict) and s.get("id") not in recorded]
         order = {
             task.get("id"): index for index, task in enumerate(
                 load_json(story_dir(base, issue) / "decomposition.json",
@@ -189,9 +195,12 @@ def load_story_stages(base: Path, issue: str) -> dict:
             if isinstance(task, dict)
         }
         stages = [s for s in stages if isinstance(s, dict) and s.get("id")]
+        if not order:  # no story decomposition beside it: the legacy list order
+            order = {s.get("id"): i for i, s in enumerate(legacy.get("stages") or [])
+                     if isinstance(s, dict)}
         stages.sort(key=lambda s: order.get(s.get("id"), len(order)))
         return {"issue": issue, "stages": stages}
-    return load_json(story_dir(base, issue) / "stages.json", default={})
+    return legacy
 
 
 def write_stages(base: Path, data: dict) -> None:
@@ -1082,6 +1091,12 @@ def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
     if waiting:
         fail(f"{args.id} waits on unfinished dependency task(s): "
              f"{', '.join(waiting)} — finish them (stage done + merged) first")
+    # Parallel means a DIFFERENT worktree: one checkout runs one stage.
+    running_here = [s["id"] for s in data.get("stages", [])
+                    if s is not stage and s.get("status") == "active"]
+    if running_here:
+        fail(f"worktree {base} already runs {', '.join(running_here)}; start "
+             f"parallel tasks in their own worktree (`forge task start {args.id}`)")
     conflicts = scope_conflicts(base, args.id)
     if conflicts:
         fail(f"{args.id} cannot start beside an active stage whose write scope "
