@@ -35,3 +35,14 @@ task at a time, each its own PR:
    `forge task pr-ready <id>`, poll CI, merge.
    Blockers found after stage done: `forge task reopen <id> --review-fix`
    (base, contract and approval stand), then step 4 again.
+
+Parallel tasks: when `forge next` lists more than one task as ready ("also
+ready in PARALLEL"), run each in its own worktree — grill and approve it in
+the story worktree, `forge task start <id>`, then grill and `forge stage
+start <id>` from inside that worktree — and watch each companion there. The
+harness decides what may run side by side (dependencies done, write scopes
+disjoint); a refusal names the sibling and the overlap, and the answer is to
+re-plan the areas or wait for that stage, never to ask the human. Bundle the
+owner questions of every ready task into one round before any of them starts.
+Merge task PRs in dependency order; after a sibling merges, merge the trunk
+into the open task worktrees, re-verify and re-review before sealing.

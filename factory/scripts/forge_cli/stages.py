@@ -154,19 +154,85 @@ def authoritative_stages_path(base: Path) -> Path:
     return git_control_dir(base) / "stages.json"
 
 
+def story_stage_records_dir(base: Path, issue: str) -> Path:
+    """The tracked, one-record-per-file stage snapshot of a story (decision
+    0022): `.factory/stories/<key>/stages/<task>.json`. Two task worktrees
+    that each commit their own record never touch one shared file."""
+    return story_dir(base, issue) / "stages"
+
+
+def _write_story_records(base: Path, issue: str, stages: list[dict],
+                         only: str = "") -> None:
+    records = story_stage_records_dir(base, issue)
+    # The single-file snapshot this layout replaces is split ONCE, from the
+    # story (trunk-side) worktree. A task worktree writes only its own record
+    # and leaves the legacy file alone — `load_story_stages` merges the two
+    # layouts until the split — so no sibling's record is ever written from a
+    # task branch.
+    legacy = story_dir(base, issue) / "stages.json"
+    if not only and legacy.is_file():
+        for stage in load_json(legacy, default={}).get("stages") or []:
+            stage_id = stage.get("id") if isinstance(stage, dict) else None
+            if isinstance(stage_id, str) and Path(stage_id).name == stage_id \
+                    and not (records / f"{stage_id}.json").is_file():
+                dump_json(records / f"{stage_id}.json", stage)
+        legacy.unlink()
+    for stage in stages:
+        stage_id = stage.get("id")
+        if not isinstance(stage_id, str) or Path(stage_id).name != stage_id:
+            continue
+        if only and stage_id != only:
+            continue
+        target = records / f"{stage_id}.json"
+        if load_json(target, default=None) != stage:
+            dump_json(target, stage)
+
+
+def load_story_stages(base: Path, issue: str) -> dict:
+    """The committed per-story snapshot, whichever layout wrote it."""
+    records = story_stage_records_dir(base, issue)
+    legacy = load_json(story_dir(base, issue) / "stages.json", default={})
+    if records.is_dir():
+        stages = [load_json(path, default={}) for path in sorted(records.glob("*.json"))]
+        # Both layouts at once (a task worktree before the story-side split):
+        # a per-task record wins for its id, the legacy file covers the rest.
+        recorded = {s.get("id") for s in stages if isinstance(s, dict)}
+        stages += [s for s in legacy.get("stages") or []
+                   if isinstance(s, dict) and s.get("id") not in recorded]
+        order = {
+            task.get("id"): index for index, task in enumerate(
+                load_json(story_dir(base, issue) / "decomposition.json",
+                          default={}).get("tasks") or [])
+            if isinstance(task, dict)
+        }
+        stages = [s for s in stages if isinstance(s, dict) and s.get("id")]
+        if not order:  # no story decomposition beside it: the legacy list order
+            order = {s.get("id"): i for i, s in enumerate(legacy.get("stages") or [])
+                     if isinstance(s, dict)}
+        stages.sort(key=lambda s: order.get(s.get("id"), len(order)))
+        return {"issue": issue, "stages": stages}
+    return legacy
+
+
 def write_stages(base: Path, data: dict) -> None:
-    """Publish protected authority first, then a best-effort workspace mirror,
-    then a per-story snapshot so a story keeps its own stages after the run
-    pointer moves on. The single git-local stages.json only ever holds the
-    active story; the board reads the per-story snapshot for any other story,
-    so a shipped story no longer loses its task-completion on the board."""
+    """Publish protected authority first, then the committed snapshot.
+
+    The git-local stages.json is per worktree (each task worktree has its own
+    git control dir), so it never merges. What merges is the story's committed
+    snapshot, kept as one record per task (`story_stage_records_dir`). A task
+    worktree writes ONLY its own task's record and leaves the workspace mirror
+    alone, so two parallel task PRs never rewrite the same file; the story
+    worktree writes every record plus the `.factory/stages.json` mirror."""
     dump_json(authoritative_stages_path(base), data)
-    safe_factory_write_json(base, stages_path(base).name, data)
+    own_task = load_json(run_state_path(base), default={}).get("task_id")
+    own_task = own_task if isinstance(own_task, str) else ""
+    if not own_task:
+        safe_factory_write_json(base, stages_path(base).name, data)
     # Only for a scoped-layout story (its dir already exists): creating the dir
     # would flip a legacy story to scoped and break its history archival.
     issue = data.get("issue")
     if issue and story_dir(base, issue).is_dir():
-        dump_json(story_dir(base, issue) / "stages.json", data)
+        _write_story_records(base, issue, data.get("stages") or [], only=own_task)
 
 
 def write_skeleton(base: Path, issue: str, tasks: list[dict]) -> None:
@@ -180,9 +246,8 @@ def write_skeleton(base: Path, issue: str, tasks: list[dict]) -> None:
     prior_issue = existing.get("issue")
     if prior_issue and prior_issue != issue:
         prior_dir = story_dir(base, prior_issue)
-        outgoing = prior_dir / "stages.json"
-        if prior_dir.is_dir() and not outgoing.is_file():
-            dump_json(outgoing, existing)
+        if prior_dir.is_dir() and not load_story_stages(base, prior_issue):
+            _write_story_records(base, prior_issue, existing.get("stages") or [])
     previous = ({s.get("id"): s for s in existing.get("stages", [])}
                 if existing.get("issue") == issue else {})
     stages = []
@@ -758,6 +823,84 @@ def effective_scope(base: Path, task_id: str, scope: list[str]) -> list[str]:
     return list(scope) + amended_scope_paths(base, task_id)
 
 
+def _at_revision(base: Path, revision: str, path: str) -> bool:
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}:{path}"], cwd=base,
+        capture_output=True, env=clean_git_env(),
+    ).returncode == 0
+
+
+def _overlap_scope(base: Path, task: dict, stage: dict | None = None) -> list[str]:
+    """Everything a task may write: its area prefixes, its amendments and the
+    test files it must create. This is what two parallel tasks must not share."""
+    task_id = str(task.get("id") or "")
+    scope = effective_scope(base, task_id, task.get("write_scope") or [])
+    # A required test that already exists at the BASE the task builds on is a
+    # proof the task must not break, not a file it writes
+    # (required_tests_outside_scope draws the same line). Judged at the stage's
+    # base — or, for a task not yet started, the trunk commit its worktree was
+    # cut from — never at this checkout's working tree: a file one branch
+    # created is still new to every sibling until it reaches the trunk.
+    revision = stage_baseline(base, stage) if stage else str(
+        load_json(run_state_path(base), default={}).get("base_main_sha") or "HEAD")
+    scope += [
+        path for path in (str((test or {}).get("path") or "")
+                          for test in task.get("required_tests") or [])
+        if path and not _at_revision(base, revision, path)
+    ]
+    return [entry.strip().rstrip("/") for entry in scope if entry and entry.strip()]
+
+
+def scope_overlap(left: list[str], right: list[str]) -> list[str]:
+    """Pairs where one entry covers the other (same path, or a prefix)."""
+    return sorted({
+        f"{a} ~ {b}" for a in left for b in right
+        if _covered(a, [b]) or _covered(b, [a])
+    })
+
+
+def active_stages_everywhere(base: Path) -> list[tuple[Path, dict]]:
+    """(worktree, stage) for every active stage of THIS story, across this
+    checkout and every linked worktree — a parallel task's stage is active in
+    its own worktree's tracker, invisible to the tracker here."""
+    from factory_lib import linked_worktree_roots
+    issue = load_json(run_state_path(base), default={}).get("issue_key")
+    found: list[tuple[Path, dict]] = []
+    seen: set[str] = set()
+    for root in linked_worktree_roots(base):
+        # A pruned or deleted worktree keeps its git bookkeeping for a while.
+        try:
+            data = load_stages(root) if root.is_dir() else {}
+        except (SystemExit, OSError):
+            continue
+        if not issue or data.get("issue") != issue:
+            continue
+        for stage in data.get("stages", []):
+            if stage.get("status") == "active" and stage.get("id") not in seen:
+                seen.add(stage.get("id"))
+                found.append((root, stage))
+    return found
+
+
+def scope_conflicts(base: Path, task_id: str) -> list[str]:
+    """Why `task_id` may not run beside the stages active right now: one line
+    per sibling whose write scope overlaps, naming the overlap. Empty means
+    the scopes are disjoint and the task may start in parallel."""
+    task = task_for(base, task_id)
+    mine = _overlap_scope(base, task)
+    conflicts: list[str] = []
+    for root, stage in active_stages_everywhere(base):
+        sibling = stage.get("id", "")
+        if sibling == task_id:
+            continue
+        theirs = _overlap_scope(
+            root, task_for(root, sibling) or task_for(base, sibling), stage)
+        overlap = scope_overlap(mine, theirs)
+        if overlap:
+            conflicts.append(f"{sibling} ({root.name}): {', '.join(overlap)}")
+    return conflicts
+
+
 def out_of_scope(base: Path, paths: list[str], scope: list[str]) -> list[str]:
     """Product paths this sequential task touched but never declared."""
     return [p for p in paths
@@ -921,13 +1064,6 @@ def _find(data: dict, stage_id: str) -> dict:
 
 
 def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
-    # Argument validity first: `--parallel` is wrong about the request itself,
-    # so it must not be reported as a missing `task start`. A refusal that
-    # names the wrong problem sends the reader to fix something that was never
-    # broken.
-    if args.parallel:
-        fail("task stages are sequential inside one story worktree; parallelism "
-             "belongs between dependency-ready stories in separate worktrees")
     from factory_lib import require_task_start_recorded
     trunk = bool(getattr(args, "trunk", False))
     require_task_start_recorded(base, args.id, trunk=trunk)
@@ -954,18 +1090,29 @@ def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
              "changed contract if the scope was wrong: the change is ledgered "
              f"and `forge stage done {args.id}` still measures against the ref "
              "this stage started from.")
-    active_others = [
-        other["id"] for other in data.get("stages", [])
-        if other is not stage and other.get("status") == "active"
-    ]
-    if active_others:
-        fail(f"{args.id} cannot start while task {', '.join(active_others)} is "
-             "active; tasks are sequential inside a story worktree")
-    earlier = data["stages"][:data["stages"].index(stage)]
-    not_done = [s["id"] for s in earlier if s.get("status") != "done"]
-    if not_done:
-        fail(f"{args.id} follows unfinished task(s): {', '.join(not_done)} — "
-             "finish them in decomposition order")
+    # The order is the dependency graph, not the list: a task starts once its
+    # dependencies are done (stage done + marker on the trunk in a task
+    # worktree; stage done in the story tracker), and it may run BESIDE another
+    # active stage when their write scopes are disjoint.
+    from factory_lib import task_dependencies, task_done_ids
+    done = task_done_ids(base)
+    tasks = load_json(protected_decomposition_state_path(base),
+                      default={}).get("tasks", [])
+    waiting = [d for d in task_dependencies(tasks, args.id) if d not in done]
+    if waiting:
+        fail(f"{args.id} waits on unfinished dependency task(s): "
+             f"{', '.join(waiting)} — finish them (stage done + merged) first")
+    # Parallel means a DIFFERENT worktree: one checkout runs one stage.
+    running_here = [s["id"] for s in data.get("stages", [])
+                    if s is not stage and s.get("status") == "active"]
+    if running_here:
+        fail(f"worktree {base} already runs {', '.join(running_here)}; start "
+             f"parallel tasks in their own worktree (`forge task start {args.id}`)")
+    conflicts = scope_conflicts(base, args.id)
+    if conflicts:
+        fail(f"{args.id} cannot start beside an active stage whose write scope "
+             f"overlaps its own: {'; '.join(conflicts)}. Finish that stage, or "
+             "re-plan the two tasks with disjoint areas.")
     approved_sha256 = require_approved_plan_digest(base)
     decomposition = load_json(protected_decomposition_state_path(base), default={})
     if not decomposition:
@@ -1015,14 +1162,51 @@ def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
     print(f"Stage {args.id} active — {stage.get('title')}")
 
 
+def stage_admission_lock_path(base: Path) -> Path:
+    """One lock for the whole repo: under git's COMMON dir, which every
+    linked worktree shares, so two `stage start`s in two worktrees serialise."""
+    common = _git(base, "rev-parse", "--git-common-dir").strip()
+    return (base / common).resolve() / "forge" / "stage-admission.lock"
+
+
+@contextlib.contextmanager
+def stage_admission(base: Path, *, timeout: float = 120.0):
+    """Hold the story-wide admission lock across check + activate, so the
+    disjointness scan and the tracker write are one step across worktrees.
+    A contender waits, then re-checks against what the winner activated."""
+    import time
+    from .delegate import _lock_file, _unlock_file
+    path = stage_admission_lock_path(base)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+", encoding="utf-8")
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                _lock_file(handle)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    fail(f"another `stage start` has held {path} for {timeout:.0f}s; "
+                         "retry once it finishes")
+                time.sleep(0.2)
+        yield
+    finally:
+        try:
+            _unlock_file(handle)
+        finally:
+            handle.close()
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     base = Path(args.repo).resolve() if args.repo else repo_root()
     from .delegate import delegation_exclusion
 
-    with delegation_exclusion(base, args.id, kind="stage-state"):
-        with delegation_exclusion(
-                base, "stages", kind="stage-state", namespace="state"):
-            _cmd_start_locked(args, base)
+    with stage_admission(base):
+        with delegation_exclusion(base, args.id, kind="stage-state"):
+            with delegation_exclusion(
+                    base, "stages", kind="stage-state", namespace="state"):
+                _cmd_start_locked(args, base)
 
 
 def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> dict:
@@ -1772,9 +1956,18 @@ def cmd_list(args: argparse.Namespace) -> None:
               "decomposition is recorded.")
         return
     marks = {"pending": " ", "active": ">", "done": "x"}
+    # A parallel task is active in ITS worktree's tracker, not this one.
+    elsewhere = {
+        stage.get("id"): root for root, stage in active_stages_everywhere(base)
+        if root.resolve() != base.resolve()
+    }
     for stage in data.get("stages", []):
         status = stage.get("status", "pending")
-        print(f"[{marks.get(status, '?')}] {stage['id']} — {stage.get('title')}")
+        where = elsewhere.get(stage["id"])
+        if where is not None and status != "active":
+            status = "active"
+        note = f" (active in {where})" if where is not None else ""
+        print(f"[{marks.get(status, '?')}] {stage['id']} — {stage.get('title')}{note}")
         measured = stage.get("measured")
         if isinstance(measured, dict):
             budget = measured.get("budget") or {}
