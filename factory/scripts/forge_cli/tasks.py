@@ -408,6 +408,35 @@ def cmd_task_reopen(args: argparse.Namespace) -> None:
         print(f"WARNING: could not reach origin/{default_branch} to confirm "
               f"{args.id} is unshipped; proceeding on local state. Do NOT reopen a "
               "task whose PR has already merged.")
+    if getattr(args, "review_fix", False):
+        # A review fix keeps the stage's identity: the contract did not change,
+        # the base ref still measures the task's real delta, and the plan
+        # approval stands. Only the stage-local review stamp goes — it is bound
+        # to the pre-fix tree — so `stage done` demands a fresh clean one.
+        # Without this, `forge review`'s own "delegate the fixes" instruction
+        # is unfollowable: delegate writes only inside an active stage, and a
+        # done stage never reopened (ASKFLOOR-1-T5a spent six degraded windows
+        # on review fixes for that reason).
+        if status != "done":
+            fail(f"task {args.id} is '{status}', not done — --review-fix reopens "
+                 "a stage that closed clean and then failed its review")
+        later = [s.get("id") for s in stages[idx + 1:]
+                 if s.get("status") in ("done", "active")]
+        if later:
+            fail(f"task {args.id} cannot take a review fix while "
+                 f"{', '.join(later)} already built on it; reopen without "
+                 "--review-fix to move the frontier back")
+        for field in ("local_review_stamp", "completed_at"):
+            target.pop(field, None)
+        target["status"] = "active"
+        target["review_fix_reopened_at"] = now_iso()
+        target["review_fix_count"] = int(target.get("review_fix_count") or 0) + 1
+        write_stages(base, data)
+        print(f"Reopened {args.id} -> active for a review fix (round "
+              f"{target['review_fix_count']}): base, contract and plan approval "
+              "stand. Delegate the fixes, record a fresh stage-local review stamp, "
+              f"then `forge stage done {args.id}` and `forge review {args.id}`.")
+        return
     # Reopening ripples forward: the done-tail built on this task has a changed
     # base, so it returns to pending too. Clear the evidence so every reopened
     # stage is re-grilled + re-implemented from scratch.
