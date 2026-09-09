@@ -25,8 +25,9 @@ import uuid
 from pathlib import Path
 
 from factory_lib import (
-    clean_git_env, evidence_path, load_json, protected_decomposition_state_path,
-    repo_root, run_state_path, safe_factory_write_bytes, schema_path,
+    branch_diff_digest, clean_git_env, evidence_path, load_json,
+    proof_path, protected_decomposition_state_path, repo_root, run_state_path,
+    safe_factory_write_bytes, schema_path,
 )
 
 from .common import fail
@@ -517,13 +518,19 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
              "the recorded decomposition, or a `## ` section of the story plan; a "
              "finding no settled text contradicts is a defect to fix, not to reject.")
     rel = f"reviews/{lens}.json"
-    path = evidence_path(base, story, rel)
+    path = proof_path(base, story, rel, task_id=task_id)
     artifact = load_json(path, default={})
     if not artifact:
-        fail(f"no recorded {lens} review for {story}")
+        fail(f"no recorded {lens} review for {task_id}; run `forge review {task_id}`")
     if artifact.get("task_id") not in (None, task_id):
         fail(f"the recorded {lens} review belongs to task {artifact.get('task_id')}, "
              f"not {task_id}; rerun `forge review {task_id}` first")
+    # A finding on a tree that is no longer the branch's is not this diff's
+    # finding: refuse before touching the record, so a rejection can never
+    # be applied to an artifact the next review will overwrite anyway.
+    if artifact.get("branch_diff_digest") != branch_diff_digest(base):
+        fail(f"the recorded {lens} review predates the current branch diff; run "
+             f"`forge review {task_id}` on this tree, then reject what it raises")
     needle = match.strip().lower()
     hits = [f for f in artifact.get("blocking_findings") or []
             if needle in json.dumps(f).lower()]
@@ -543,7 +550,7 @@ def reject_finding(base: Path, task_id: str, lens: str, match: str, *,
     non_blocking = len(artifact.get("non_blocking_findings") or [])
     artifact["score"] = _score(blocking, non_blocking)
     artifact["recommendation"] = _recommendation(blocking, non_blocking)
-    dump_json(evidence_path(base, story, rel, for_write=True), artifact)
+    dump_json(proof_path(base, story, rel, task_id=task_id, for_write=True), artifact)
     area = str(finding.get("area", "")).strip() if isinstance(finding, dict) else ""
     applies_to = [f"{area}/**"] if area else ["**"]
     summary = (str(finding.get("summary", ""))[:160] if isinstance(finding, dict)
@@ -585,11 +592,10 @@ def _review_set_problem(base: Path, story: str, task_id: str) -> str:
     """Why the recorded lens artifacts cannot seal `task_id` right now — empty
     when every lens is recorded for this task against the current branch diff
     with no blocking finding left."""
-    from factory_lib import branch_diff_digest
     current = branch_diff_digest(base)
     for lens in LENSES:
-        recorded = load_json(evidence_path(base, story, f"reviews/{lens}.json"),
-                             default={})
+        recorded = load_json(
+            proof_path(base, story, f"reviews/{lens}.json", task_id=task_id), default={})
         if not recorded:
             return f"the {lens} lens is not recorded; run `forge review {task_id}`"
         if recorded.get("task_id") != task_id:
@@ -628,12 +634,22 @@ def _cite_resolves(base: Path, story: str, cite: str) -> str:
                        if ln.startswith("## ")]
         except OSError:
             headers = []
+    # Scaffolding headers every plan carries name nothing settled; a citation
+    # of "Risks" or "Problem" is not a contract.
+    generic = {"problem", "context", "scope / non-goals", "scope", "risks",
+               "verify plan", "surface impact", "technical approach",
+               "task decomposition", "grill provenance", "acceptance criteria",
+               "manual verification", "workflow"}
     for token in tokens:
         if re.fullmatch(r"\d{4}", token) and any(decisions.glob(f"{token}-*.md")):
             return f"decision {token}"
         if token in contract_ids:
             return f"contract {token}"
+        if len(token) < 2 or (len(token) < 3 and not re.fullmatch(r"[A-Z]\d+", token)):
+            continue
         for header in headers:
+            if header.strip().lower() in generic:
+                continue
             if re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", header, re.I):
                 return f"plan section '{header}'"
     return ""
@@ -740,7 +756,8 @@ def cmd_review(args: argparse.Namespace) -> None:
         payload = tmp / f"{lens}.artifact.json"
         payload.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(recorder), "--aspect", lens, "--input", str(payload)],
+            [sys.executable, str(recorder), "--aspect", lens, "--task", args.id,
+             "--input", str(payload)],
             cwd=base, capture_output=True, text=True, encoding="utf-8",
             env={**os.environ, "PYTHONUTF8": "1"},
         )

@@ -19,8 +19,9 @@ from test_gates import (  # noqa: I001 — test_gates puts factory/scripts on sy
     sign_off, skeletal_stage_task, write_stages,
 )
 from factory_lib import (  # noqa: E402
-    evidence_path, load_json, protected_decomposition_state_path,
+    load_json, proof_path, protected_decomposition_state_path,
 )
+from forge_cli.findings import _finding_rows  # noqa: E402
 from forge_cli.lessons import load_lessons  # noqa: E402
 from forge_cli.review import LENSES  # noqa: E402
 from forge_cli.review_brief import _plan_section_bodies, _task_section  # noqa: E402
@@ -96,7 +97,7 @@ def _record_lens(repo, lens: str, blocking: list[dict], task_id: str = "T2") -> 
         payload["contract_verdicts"] = [
             {"contract_id": "T1-AC1", "verdict": "implemented", "evidence": "src/work.py:1"},
         ]
-    code, out = run(repo, "record_review_from_json.py", "--aspect", lens,
+    code, out = run(repo, "record_review_from_json.py", "--aspect", lens, "--task", task_id,
                     stdin=json.dumps(payload))
     assert code == 0, out
 
@@ -113,7 +114,7 @@ def test_reject_moves_the_finding_ledgers_a_lesson_and_stamps_when_clean(repo, t
                     "--lens", "security", "--reason", "T1-AC1 keys the consult on the rail case",
                     "--cite", "T1-AC1; story S4", "--by", "autoreview")
     assert code == 0 and "Rejected security finding" in out, out
-    recorded = load_json(evidence_path(repo, "ENG-1", "reviews/security.json"), default={})
+    recorded = load_json(proof_path(repo, "ENG-1", "reviews/security.json", task_id="T2"), default={})
     assert recorded["blocking_findings"] == []
     assert recorded["rejected_findings"][0]["finding"] == hard
     assert recorded["rejected_findings"][0]["cite"] == "T1-AC1; story S4"
@@ -133,7 +134,7 @@ def test_reject_refuses_a_citation_that_names_nothing_settled(repo, tmp_path):
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
                     "--lens", "security", "--reason", "r", "--cite", "c", "--by", "autoreview")
     assert code != 0 and "names nothing settled" in out, out
-    recorded = load_json(evidence_path(repo, "ENG-1", "reviews/security.json"), default={})
+    recorded = load_json(proof_path(repo, "ENG-1", "reviews/security.json", task_id="T2"), default={})
     assert recorded["blocking_findings"] == [hard]
     # A decision id resolves; so does a plan section header word.
     (repo / "docs" / "decisions").mkdir(parents=True, exist_ok=True)
@@ -154,14 +155,17 @@ def test_reject_never_stamps_from_an_incomplete_or_stale_review_set(repo, tmp_pa
     assert code == 0 and "No stamp: the quality lens is not recorded" in out, out
     assert "local_review_stamp" not in next(
         s for s in load_stages(repo)["stages"] if s["id"] == "T2")
-    # A lens recorded for another task cannot seal this one either.
+    # A lens recorded for another task lives under THAT task and never counts
+    # for this one: storage is per task, so T2's quality lens is simply absent.
     _record_lens(repo, "quality", [], task_id="T1")
     _record_lens(repo, "performance", [])
     _record_lens(repo, "security", [hard])
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
                     "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
                     "--by", "autoreview")
-    assert code == 0 and "No stamp: the quality lens was recorded for T1" in out, out
+    assert code == 0 and "No stamp: the quality lens is not recorded" in out, out
+    assert load_json(proof_path(repo, "ENG-1", "reviews/quality.json", task_id="T1"),
+                     default={}).get("task_id") == "T1"
 
 
 def test_reject_refuses_an_ambiguous_or_missing_match(repo, tmp_path):
@@ -179,3 +183,41 @@ def test_reject_refuses_an_ambiguous_or_missing_match(repo, tmp_path):
     code, out = run(repo, "forge.py", "review", "T2", "--reject", "nothing-like-this",
                     "--lens", "quality", "--reason", "r", "--cite", "T1-AC1", "--by", "autoreview")
     assert code != 0 and "no blocking quality finding matches" in out, out
+
+
+def test_reject_refuses_a_stale_artifact_before_touching_it(repo, tmp_path):
+    _story(repo, tmp_path)
+    hard = {"category": "security", "area": "src/runtime", "summary": "hardFloor thing"}
+    _record_lens(repo, "security", [hard])
+    (repo / "src" / "later.py").write_text("more work\n")
+    git(repo, "add", "src/later.py")
+    git(repo, "commit", "-q", "-m", "T2 more work")
+    code, out = run(repo, "forge.py", "review", "T2", "--reject", "hardFloor",
+                    "--lens", "security", "--reason", "r", "--cite", "T1-AC1",
+                    "--by", "autoreview")
+    assert code != 0 and "predates the current branch diff" in out, out
+    recorded = load_json(proof_path(repo, "ENG-1", "reviews/security.json", task_id="T2"),
+                         default={})
+    assert recorded["blocking_findings"] == [hard]
+
+
+def test_rejected_findings_cluster_in_patterns_flagged():
+    rows = _finding_rows("T2", "security", {
+        "blocking_findings": [],
+        "rejected_findings": [{"finding": {"category": "security", "area": "src/runtime",
+                                           "summary": "hardFloor thing"},
+                               "reason": "r", "cite": "T1-AC1"}],
+    })
+    assert rows == [{"task": "T2", "aspect": "security", "blocking": False, "rejected": True,
+                     "category": "security", "area": "src/runtime", "summary": "hardFloor thing"}]
+
+
+def test_generic_plan_headers_do_not_resolve_a_citation(repo, tmp_path):
+    from forge_cli.review import _cite_resolves
+    _story(repo, tmp_path)
+    plan = next((repo / "plans" / "active").glob("ENG-1-*.md"))
+    plan.write_text(plan.read_text() + "\n## Risks\nnone\n\n## Owner rulings\n- S4 stays\n")
+    assert _cite_resolves(repo, "ENG-1", "Risks") == ""
+    assert _cite_resolves(repo, "ENG-1", "rulings") == "plan section 'Owner rulings'"
+    assert _cite_resolves(repo, "ENG-1", "T1-AC1") == "contract T1-AC1"
+    assert _cite_resolves(repo, "ENG-1", "c") == ""
