@@ -50,6 +50,14 @@ def load_events(base: Path) -> list[dict]:
     return read_ledger_records(ledger_path(base))
 
 
+def closed_windows(base: Path) -> list[dict]:
+    """Every window that CLOSED with `done` (never an abandoned or open one),
+    as its ledgered done record: id, profile/kind, reason, started_at,
+    completed_at and the files it claimed."""
+    return [event for event in load_events(base)
+            if event.get("event") == "done" and isinstance(event.get("id"), str)]
+
+
 def _append(base: Path, event: dict) -> None:
     stamp = event.get("completed_at") or event.get("started_at") or now_iso()
     record_id = f"{stamp.replace(':', '').replace('-', '')}-{event.get('id', 'q')}-{event.get('event', '')}"
