@@ -609,6 +609,16 @@ def main() -> None:
     p_review.add_argument(
         "--skill", help="path to the autoreview helper (default: $AUTOREVIEW "
                         "or ~/.codex/skills/autoreview/scripts/autoreview)")
+    p_review.add_argument(
+        "--reject", metavar="MATCH",
+        help="do not run: move the one recorded blocking finding of --lens whose "
+             "text contains MATCH into rejected_findings because it contradicts an "
+             "accepted contract (--reason, --cite required); ledgers the contract "
+             "as a lesson and stamps the stage when no lens blocks any more")
+    p_review.add_argument("--reason", help="with --reject: why it is not a defect")
+    p_review.add_argument(
+        "--cite", help="with --reject: the decision, plan line or sealed contract")
+    p_review.add_argument("--by", help="with --reject: the recording agent")
     p_review.add_argument("--repo")
     p_review.set_defaults(func=review_mod.cmd_review)
 

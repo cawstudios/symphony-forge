@@ -221,11 +221,14 @@ def _compose_brief(base: Path, gate: str, label: str, artifact: str,
     ])
 
 
-# Five cold reads without a recordable pass means the grill is no longer
-# converging on the artifact. Rounds past this bought nothing on every story
-# that reached them — one ran to eleven and asked for help, one to twenty-six,
-# one to forty over six hours.
-ROUNDS_BEFORE_ESCALATING = 5
+# Two cold reads without a recordable pass means the grill is no longer
+# converging on the artifact. Round one finds the seam errors, round two
+# checks the fold; every round past that on the stories measured bought only
+# residue an implementer hits anyway (one ran to eleven and asked for help,
+# one to twenty-six, one to forty over six hours; a task grill's third round
+# returned locks, a locale and a bounded key). Past two, the human is brought
+# in or the residue is folded and the work starts.
+ROUNDS_BEFORE_ESCALATING = 2
 
 
 def _rounds_since_last_pass(base: Path, ledger_id: str, gate: str,

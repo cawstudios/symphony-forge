@@ -110,7 +110,12 @@ dependencies, and author that leaf's execution contract.
 Confirm or refine its `acceptance_criteria`, then add or confirm these fields
 on the selected task:
 
-- `write_scope`
+- `write_scope` — the AREAS the task may change, as directory prefixes
+  (`apps/core/src/application/permissions`, `apps/core/test/unit/channels`)
+  plus any NEW file by name. Do not enumerate every existing file: the list is
+  never right, the grill then spends rounds correcting it, and `stage done`
+  measures and records the exact paths anyway (`stage amend-scope` exists for
+  the rest). A prefix covers everything beneath it.
 - `verify_commands`
 - `required_tests` — executable proof objects shaped exactly as
   `{"id":"testcase name","path":"repo/relative/test file","command":"exact runner command"}`.
