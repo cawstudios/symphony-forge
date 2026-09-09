@@ -64,7 +64,9 @@ them to arbitrate something already settled.
   is genuinely outside the task's scope, with a reason and a revisit trigger.
 - **Host-side fixing** is the single exception, and only when the defect cannot
   be reproduced or fixed inside the Codex sandbox. Open a ledgered degraded
-  window and state why.
+  window and state why. A window that closes with at most five files, all
+  inside the task's write scope, is accepted by `stage done` as the stage's
+  write launch and recorded on the stage.
 
 ## Testing
 

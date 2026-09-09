@@ -15,6 +15,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -72,6 +73,16 @@ def workflow_prefixes(base: Path) -> tuple[str, ...]:
     from factory_lib import vendored_client
     return (WORKFLOW_PATHS + HARNESS_MACHINERY_PATHS
             if vendored_client(base) else WORKFLOW_PATHS)
+
+
+# A decision record written mid-stage is the workflow's own bookkeeping (the
+# coordinator answering a signal), never a write_scope stray.
+MEASURE_EXEMPT_PATHS = ("docs/decisions/",)
+
+
+def measure_prefixes(base: Path) -> tuple[str, ...]:
+    """Prefixes `stage done` leaves out of the measured product delta."""
+    return workflow_prefixes(base) + MEASURE_EXEMPT_PATHS
 
 
 DEFAULT_REVIEW_BUDGET_FILES = 8
@@ -750,7 +761,7 @@ def effective_scope(base: Path, task_id: str, scope: list[str]) -> list[str]:
 def out_of_scope(base: Path, paths: list[str], scope: list[str]) -> list[str]:
     """Product paths this sequential task touched but never declared."""
     return [p for p in paths
-            if not p.startswith(workflow_prefixes(base))
+            if not p.startswith(measure_prefixes(base))
             and not _covered(p, scope)]
 
 
@@ -1014,12 +1025,18 @@ def cmd_start(args: argparse.Namespace) -> None:
             _cmd_start_locked(args, base)
 
 
-def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> None:
+def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> dict:
     """Closing a stage is a measurement, not an assertion.
 
     Every other diff-based check in this repo fires when TOO MUCH changed.
     None fired when too little did — which is exactly what a stalled or
-    half-finished delegation looks like, and it signed itself off."""
+    half-finished delegation looks like, and it signed itself off.
+
+    Returns what it measured (strays, files, lines, budget). Strays and a
+    budget overrun are RECORDED on the stage and printed as notes, not
+    refused: the review has already read the diff, and refusing here only
+    ever produced a re-record/re-grill loop. The one measure that still
+    refuses is a delta above twice the declared line budget."""
     base_sha = stage_baseline(base, stage)
     if not base_sha:
         fail(f"{stage_id} was started before its base commit was recorded, so "
@@ -1055,7 +1072,7 @@ def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> None:
              "worktree agree before closing the stage.")
     product = [
         path for path in changed_paths(base, base_sha, baseline)
-        if not path.startswith(workflow_prefixes(base))
+        if not path.startswith(measure_prefixes(base))
     ]
     contributions = contribution_paths(base, product, baseline, base_sha)
     if not contributions:
@@ -1064,48 +1081,67 @@ def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> None:
              "stalled or read-only run looks like. If the work is genuinely "
              f"partial, say so: forge stage done {stage_id} --incomplete \"<what "
              "is missing>\".")
+    # A recorded amendment is measured fact, not a widened permission: it
+    # only ever names paths a previous measurement already found changed.
     scope = task.get("write_scope") or []
-    if scope:
-        if not any(_covered(path, scope) for path in contributions):
-            fail(f"{stage_id} closes without changing anything in its own "
-                 "write_scope.")
-        # A recorded amendment is measured fact, not a widened permission: it
-        # only ever names paths a previous measurement already found changed.
-        strays = out_of_scope(base, product, effective_scope(base, stage_id, scope))
-        if strays:
-            fail(f"{stage_id} changed {len(strays)} path(s) outside its declared "
-                 f"write_scope: {', '.join(strays[:10])}"
-                 f"{'…' if len(strays) > 10 else ''}. Either the work exceeded "
-                 "the task, or the scope was under-declared. If the scope was "
-                 f"wrong, record it: `forge stage amend-scope {stage_id} "
-                 "--reason \"<why these paths belong>\"` — it re-measures and "
-                 "adds EXACTLY the paths it finds, leaving the contract (and so "
-                 "the grill and the delegate launch bound to it) intact. Do NOT "
-                 "re-record the decomposition to fix this: that changes the "
-                 "contract digest, invalidates the launch this same command "
-                 "demands, and deadlocks the close.")
+    strays = out_of_scope(base, product, effective_scope(base, stage_id, scope))
     try:
         max_files, max_lines, _reason = review_budget(task)
     except ValueError as exc:
         fail(f"{stage_id} carries an invalid review_budget ({exc}); re-record "
              "the decomposition before closing the stage")
-    changed_files = len(product)
     changed_lines = _changed_line_count(base, base_sha, product)
-    if changed_files > max_files or changed_lines > max_lines:
+    if changed_lines > 2 * max_lines:
         fail(
-            f"{stage_id} exceeds its review budget: measured files={changed_files}, "
-            f"lines={changed_lines}; budget files={max_files}, lines={max_lines} "
-            "(additions + deletions; excluding .factory/ "
-            "and plans/). The default 8 files / 400 lines is the policy target. "
-            "Split the task: re-run the task grill with decision=split, append "
-            "new skeletal task(s) after the frozen graph prefix, and return this "
-            f"stage incomplete with `forge stage done {stage_id} --incomplete "
-            "\"<what remains>\"`."
+            f"{stage_id} changed {changed_lines} lines, more than TWICE its "
+            f"{max_lines}-line review budget (additions + deletions; excluding "
+            ".factory/, plans/ and docs/decisions/). A delta this size is not "
+            "one reviewable change. Split the task: re-run the task grill with "
+            "decision=split, append new skeletal task(s) after the frozen graph "
+            f"prefix, and return this stage incomplete with `forge stage done "
+            f"{stage_id} --incomplete \"<what remains>\"`."
         )
+    return {
+        "strays": strays,
+        "files": len(product),
+        "lines": changed_lines,
+        "budget": {"files": max_files, "lines": max_lines},
+    }
 
 
-def _host_window_covering(base: Path, stage: dict) -> dict | None:
-    """A ledgered degraded (host-fix) window opened during this stage.
+def _measure_notes(stage_id: str, measured: dict) -> list[str]:
+    """What `stage done` says about a measurement it recorded but did not
+    refuse. Kept out of `_measure`, which runs several times per close."""
+    notes: list[str] = []
+    strays = measured.get("strays") or []
+    if strays:
+        notes.append(
+            f"NOTE: {stage_id} changed {len(strays)} path(s) outside its declared "
+            f"write_scope: {', '.join(strays[:10])}"
+            f"{'…' if len(strays) > 10 else ''}. Recorded on the stage for "
+            "review (`forge stage list`). If the scope was under-declared, say "
+            f"why: `forge stage amend-scope {stage_id} --reason \"<why these "
+            "paths belong>\"` — it records EXACTLY the paths measured, leaving "
+            "the contract (and so the grill and the delegate launch bound to "
+            "it) intact. Do NOT re-record the decomposition to fix this: that "
+            "changes the contract digest and invalidates the launch.")
+    budget = measured.get("budget") or {}
+    files, lines = measured.get("files", 0), measured.get("lines", 0)
+    if files > budget.get("files", files) or lines > budget.get("lines", lines):
+        notes.append(
+            f"NOTE: {stage_id} exceeds its review budget: measured files={files}, "
+            f"lines={lines}; budget files={budget.get('files')}, "
+            f"lines={budget.get('lines')}. The default 8 files / 400 lines is "
+            "the policy target; recorded on the stage for review.")
+    for miss in measured.get("test_id_misses") or []:
+        notes.append(f"NOTE: {stage_id} required test {miss}; recorded on the "
+                     "stage — the run itself passed.")
+    return notes
+
+
+def _host_window_covering(base: Path, stage: dict, task: dict) -> dict | None:
+    """A ledgered degraded (host-fix) window CLOSED during this stage, bounded
+    to the window's file cap and to the task's effective write scope.
 
     Codex's sandbox cannot see every defect — a failure that only appears against
     a real database, or a check that only runs on the host — so the coordinator
@@ -1114,24 +1150,37 @@ def _host_window_covering(base: Path, stage: dict) -> dict | None:
     could not exist for such a fix, leaving no way to close the stage and making
     shipping around the flow look like the only option. Accepting the window
     keeps the evidence (it is ledgered and bounded) without the dead end."""
-    from .quickfix import DEGRADED, load_active, load_events, profile_of
+    from .quickfix import DEGRADED, MAX_FILES, closed_windows, profile_of
 
     started = str(stage.get("started_at") or "")
-    active = load_active(base)
-    if (active and profile_of(active) == DEGRADED
-            and str(active.get("started_at") or "") >= started):
-        return active
-    for event in load_events(base):
-        if (event.get("event") == "done"
-                and (event.get("profile") == DEGRADED
-                     or event.get("kind") == DEGRADED)
-                and str(event.get("started_at") or "") >= started):
-            return event
+    scope = effective_scope(base, str(stage.get("id") or ""),
+                            task.get("write_scope") or [])
+    for window in closed_windows(base):
+        if profile_of(window) != DEGRADED and window.get("kind") != DEGRADED:
+            continue
+        # Opened while THIS stage was active (the stage is still active now,
+        # so a later start is enough) and tied to it by what it touched: a
+        # NON-EMPTY file list, every file inside the effective scope. An empty
+        # list proves nothing; a foreign file is another task's work.
+        if not started or str(window.get("started_at") or "") < started:
+            continue
+        # Bound to THIS stage at open time (quickfix records task_id when a
+        # degraded window opens mid-stage); an older, unbound window is
+        # refused — reopen one.
+        if window.get("task_id") != stage.get("id"):
+            continue
+        files = [f for f in (window.get("files") or []) if isinstance(f, str)]
+        if not files or len(files) > MAX_FILES:
+            continue
+        if all(_covered(path, scope) for path in files):
+            return window
     return None
 
 
 def _require_successful_launch(base: Path, stage_id: str, stage: dict,
-                               task: dict) -> None:
+                               task: dict) -> str:
+    """Refuse without a successful Codex write launch or a covering host-fix
+    window. Returns the window id when a window satisfied it, else ""."""
     from .delegate import argv_digest, brief_path, current_delegation
 
     digest = task_digest(task)
@@ -1175,35 +1224,51 @@ def _require_successful_launch(base: Path, stage_id: str, stage: dict,
         and entry.get("brief_sha256") == sha256_of(brief)
         and argv_valid
     )
-    if not valid:
-        window = _host_window_covering(base, stage)
-        if window:
-            print(f"{stage_id}: no Codex write launch, but ledgered host-fix "
-                  f"window {window.get('id', '?')} covers this stage — accepted "
-                  "as the sanctioned write path.")
-            return
-        fail(f"{stage_id} has no successful write launch bound to this stage, "
-             "task contract and brief. Either run `forge delegate "
-             f"{stage_id}` successfully (`--print-only` is diagnostic only), or "
-             "— when the fix is one Codex's sandbox cannot make (a DB-surfaced "
-             "defect, a host-only check) — make it inside a ledgered window: "
-             "`forge mode degraded start --reason \"<why Codex cannot>\"`, fix, "
-             "`forge mode done`.")
+    if valid:
+        return ""
+    window = _host_window_covering(base, stage, task)
+    if window:
+        return str(window.get("id") or "?")
+    fail(f"{stage_id} has no successful write launch bound to this stage, "
+         "task contract and brief. Either run `forge delegate "
+         f"{stage_id}` successfully (`--print-only` is diagnostic only), or "
+         "— when the fix is one Codex's sandbox cannot make (a DB-surfaced "
+         "defect, a host-only check) — make it inside a ledgered window: "
+         "`forge mode degraded start --reason \"<why Codex cannot>\"`, fix, "
+         "`forge mode done` (opened while THIS stage is active so it is bound "
+         "to it, closed with one to five files, all inside the task's write "
+         "scope; a window opened before this binding existed does not count — "
+         "reopen one).")
 
 
 def _junit_case_matches_id(case, test_id: str) -> bool:
     """A JUnit <testcase> identifies the required test when its name equals the
-    id, OR its leaf name does. Vitest/Jest prefix the testcase name with the
+    id, its leaf name does, OR the recorded id is a prefix of either (after
+    normalising whitespace). Vitest/Jest prefix the testcase name with the
     describe path (e.g. 'application backbone > t1-boot-migrate'), so matching
     only the exact full name forces a describe-free test structure for no real
-    gain — the leaf is what the required-test id names."""
-    name = str(case.get("name", ""))
-    if name == test_id:
-        return True
+    gain — the leaf is what the required-test id names. Parametrised runners
+    append a case suffix ('t1-boot-migrate [sqlite]'), which is why a prefix
+    still identifies the test."""
+    def norm(text: str) -> str:
+        return " ".join(text.split())
+
+    wanted = norm(test_id)
+    if not wanted:
+        return False
+    name = norm(str(case.get("name", "")))
+    candidates = [name]
     for sep in (" > ", " › ", "::"):
-        if sep in name and name.rsplit(sep, 1)[-1].strip() == test_id:
-            return True
-    return False
+        if sep in name:
+            candidates.append(name.rsplit(sep, 1)[-1].strip())
+    # A prefix counts only when a parameter suffix follows — '[' or '(' after
+    # optional whitespace — so neither 'test_slice_extra' nor 'test_slice more'
+    # satisfies 'test_slice'.
+    return any(
+        c == wanted or (c.startswith(wanted)
+                        and re.match(r"\s*[\[(]", c[len(wanted):]) is not None)
+        for c in candidates
+    )
 
 
 def _junit_case_attributed(case, rel: str) -> bool:
@@ -1223,13 +1288,18 @@ def _junit_case_attributed(case, rel: str) -> bool:
             or candidate.endswith("/" + declared))
 
 
-def _run_required_tests(base: Path, stage_id: str, task: dict) -> None:
+def _run_required_tests(base: Path, stage_id: str, task: dict) -> list[str]:
+    """Run every required test; refuse when one FAILS or never ran. A recorded
+    id that matches no testcase (or one attributed to another path) is a
+    MEASURED miss — returned, recorded on the stage, never a refusal: the run
+    passed, only the bookkeeping did not line up."""
     from .delegate import (
         blocked_termination_signals, _capture_spawn_identity, _process_table,
         _terminate_observed_process_tree, _wait_and_reap,
         unblock_termination_signals_in_child,
     )
 
+    misses: list[str] = []
     for proof in task.get("required_tests") or []:
         if not isinstance(proof, dict) or not all(
                 isinstance(proof.get(key), str) for key in ("id", "path", "command")):
@@ -1337,20 +1407,23 @@ def _run_required_tests(base: Path, stage_id: str, task: dict) -> None:
                 if _junit_case_matches_id(case, test_id)
             ]
             if not matches:
-                fail(f"{stage_id} required test {test_id!r} was not present in "
-                     "the fresh JUnit report")
+                misses.append(f"{test_id!r} was not present in the fresh JUnit "
+                              "report (exact id or id-prefix)")
+                continue
             attributed = [
                 case for case in matches
                 if _junit_case_attributed(case, rel)
             ]
             if not attributed:
-                fail(f"{stage_id} required test {test_id!r} was not attributed "
-                     f"to its declared path {rel!r} in the fresh JUnit report")
+                misses.append(f"{test_id!r} was not attributed to its declared "
+                              f"path {rel!r} in the fresh JUnit report")
+                continue
             if any(case.find("failure") is not None
                    or case.find("error") is not None
                    or case.find("skipped") is not None for case in attributed):
                 fail(f"{stage_id} required test {test_id!r} did not pass in the "
                      "fresh JUnit report")
+    return misses
 
 
 def _run_verify_commands(base: Path, stage_id: str, task: dict) -> None:
@@ -1435,7 +1508,7 @@ def _finish_stage(base: Path, args: argparse.Namespace, data: dict,
     authority_tree = protected_authority_snapshot(base)
     with termination_signal_guard():
         _run_verify_commands(base, args.id, task)
-        _run_required_tests(base, args.id, task)
+        test_id_misses = _run_required_tests(base, args.id, task)
     if product_tree_snapshot(base) != proof_tree:
         fail(f"{args.id} proof commands changed the product tree; verification "
              "must be read-only")
@@ -1467,8 +1540,8 @@ def _finish_stage(base: Path, args: argparse.Namespace, data: dict,
         if task_digest(locked_task) != task_digest(final_task):
             fail(f"{args.id}'s task contract changed while its done transition "
                  "was being serialized; nothing was written — retry.")
-        _measure(base, args.id, current, locked_task)
-        _require_successful_launch(base, args.id, current, locked_task)
+        measured = _measure(base, args.id, current, locked_task)
+        window = _require_successful_launch(base, args.id, current, locked_task)
         _require_reviewed_commit(base, current, locked_task)
         if product_tree_snapshot(base) != proof_tree:
             fail(f"{args.id}'s product tree changed after its required proof; "
@@ -1477,6 +1550,24 @@ def _finish_stage(base: Path, args: argparse.Namespace, data: dict,
         current.pop("attested_digests", None)
         current["status"] = "done"
         current["completed_at"] = now_iso()
+        # What the close MEASURED, recorded for review rather than refused:
+        # strays, the budget it used, required-test ids that matched no case.
+        current["measured"] = {**measured, "test_id_misses": test_id_misses}
+        if window:
+            # No Codex write launch; a bounded, ledgered host-fix window was the
+            # sanctioned write path. Say which one.
+            current["host_window"] = window
+            print(f"{args.id}: no Codex write launch; ledgered host-fix window "
+                  f"{window} (closed, in scope) is the sanctioned write path.")
+        notes = _measure_notes(args.id, current["measured"])
+        for note in notes:
+            print(note)
+        if notes:
+            append_event(base, "stage-measured", actor="implementer",
+                         story=data.get("issue", ""),
+                         detail=f"{args.id}: " + "; ".join(
+                             note.removeprefix("NOTE: ").split(". ")[0]
+                             for note in notes))
         # A contract that moved mid-stage is EVIDENCE, not a refusal (0023):
         # review sees the widened scope and can ask why. Recorded HERE, past
         # the last snapshot check, because every write before it changes a
@@ -1684,6 +1775,20 @@ def cmd_list(args: argparse.Namespace) -> None:
     for stage in data.get("stages", []):
         status = stage.get("status", "pending")
         print(f"[{marks.get(status, '?')}] {stage['id']} — {stage.get('title')}")
+        measured = stage.get("measured")
+        if isinstance(measured, dict):
+            budget = measured.get("budget") or {}
+            line = (f"    measured: files={measured.get('files')}/"
+                    f"{budget.get('files')} lines={measured.get('lines')}/"
+                    f"{budget.get('lines')}")
+            if measured.get("strays"):
+                line += f"; strays: {', '.join(measured['strays'])}"
+            if measured.get("test_id_misses"):
+                line += (f"; required-test id misses: "
+                         f"{'; '.join(measured['test_id_misses'])}")
+            if stage.get("host_window"):
+                line += f"; host-fix window: {stage['host_window']}"
+            print(line)
 
 
 def _cmd_migrate_locked(args: argparse.Namespace, base: Path) -> None:

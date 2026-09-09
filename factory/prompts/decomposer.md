@@ -90,7 +90,7 @@ otherwise):
 - `id`
 - `title`
 - `objective` — one or two sentences of WHAT this task changes and WHY, in the
-  language a reader uses six weeks later. Capped at 500 characters: it is the
+  language a reader uses six weeks later. Capped at 2000 characters: it is the
   summary a human reads on the board, not the implementation transcript. Put
   the how in the plan.
 - `acceptance_criteria` — non-empty; a task nobody can check is done cannot be

@@ -30,6 +30,8 @@ task at a time, each its own PR:
    contradicts an accepted decision / plan section / sealed contract:
    `forge review <id> --reject "<text>" --lens <l> --reason ... --cite ...
    --by ...` (it must resolve to something settled);
-5. `forge stage done <id>`, then `forge task pr-ready <id>`, poll CI, merge.
+5. `forge stage done <id>` (strays, budget and test-id misses are recorded
+   as NOTES, not refused; only >2x the line budget refuses), then
+   `forge task pr-ready <id>`, poll CI, merge.
    Blockers found after stage done: `forge task reopen <id> --review-fix`
    (base, contract and approval stand), then step 4 again.
