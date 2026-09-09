@@ -1826,10 +1826,14 @@ def task_digest(task: dict) -> str:
 
 
 def plan_digest_without_assumptions(path: Path) -> str:
-    """Hash the approved plan while excluding implementation-time appendices."""
-    text = path.read_text(encoding="utf-8")
-    approved_text = text.partition("\n## Implementation Assumptions")[0]
-    return hashlib.sha256(approved_text.encode()).hexdigest()
+    """The plan digest every grill and approval binds to: the authored BODY,
+    without the frontmatter block and without implementation-time appendices.
+
+    Same digest as ``plan_body_digest``. Hashing the frontmatter too meant
+    `plan save`'s own `saved:` timestamp changed the digest, so a grill
+    recorded against the draft never matched the saved copy and every plan
+    needed a second grill record before it could be approved."""
+    return plan_body_digest(path)
 
 
 def plan_body_digest(path: Path) -> str:
@@ -1891,7 +1895,17 @@ def require_approved_plan_digest(root: Path) -> str:
     return approved
 
 
-def product_tree_digest(root: Path, treeish: str = "") -> str:
+def harness_owned_prefixes() -> tuple[str, ...]:
+    """Paths the workflow writes while a task is being planned or worked —
+    the run/stage/evidence tree, plans, decision records, the context ledger.
+    None of them is the product a grill read."""
+    from forge_cli.review import HARNESS_PREFIXES
+    from forge_cli.stages import WORKFLOW_PATHS
+    return tuple(sorted(set(WORKFLOW_PATHS) | set(HARNESS_PREFIXES)))
+
+
+def product_tree_digest(root: Path, treeish: str = "",
+                        exclude: tuple[str, ...] = (".factory/", "plans/")) -> str:
     """Hash product blobs from the index, or from a named historical tree."""
     git_args = (["ls-tree", "-r", "-z", treeish]
                 if treeish else ["ls-files", "--stage", "-z"])
@@ -1914,7 +1928,7 @@ def product_tree_digest(root: Path, treeish: str = "") -> str:
         if not entry:
             continue
         metadata, path = entry.split("\t", 1)
-        if path.startswith((".factory/", "plans/")):
+        if path.startswith(exclude):
             continue
         fields = metadata.split()
         blobs.append((path, fields[2] if treeish else fields[1]))
@@ -1994,8 +2008,12 @@ def grounding_digest(root: Path, task: dict, *, treeish: str = "",
     # moves BECAUSE OF the work the grill authorised, so binding to it makes
     # the gate self-defeating: committing the implementation stales the grill,
     # and the grill is what `forge delegate` needs to fix the implementation.
+    # Harness-owned paths (a decision record, the context ledger) are left
+    # out even before the stage: writing one is the workflow doing its job,
+    # not the codebase the grill read changing under it.
     if not in_stage:
-        body["product_tree_sha256"] = product_tree_digest(root, treeish)
+        body["product_tree_sha256"] = product_tree_digest(
+            root, treeish, exclude=harness_owned_prefixes())
     payload = json.dumps(body, sort_keys=True, separators=(",", ":"),
                          ensure_ascii=True)
     return hashlib.sha256(payload.encode()).hexdigest()
