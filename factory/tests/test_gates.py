@@ -1115,18 +1115,20 @@ def test_board_stages_are_attributed_per_story(repo):
     from forge_cli.board import _stages_for
     from forge_cli import stages as stages_mod
 
-    # A scoped-layout story (intake created its dir) gets a per-story snapshot.
+    # A scoped-layout story (intake created its dir) gets a per-story snapshot:
+    # one record per task (decision 0022), never one shared stages.json.
     (repo / ".factory" / "stories" / "STORY-A").mkdir(parents=True)
     stages_mod.write_stages(
         repo, {"issue": "STORY-A",
                "stages": [{"id": "T1", "title": "t", "status": "done"}]})
-    snap_a = repo / ".factory" / "stories" / "STORY-A" / "stages.json"
-    assert snap_a.is_file(), "write_stages writes a per-story snapshot"
+    snap_a = repo / ".factory" / "stories" / "STORY-A" / "stages" / "T1.json"
+    assert snap_a.is_file(), "write_stages writes a per-task story record"
+    assert not (repo / ".factory" / "stories" / "STORY-A" / "stages.json").exists()
 
     # Decomposing STORY-B flips the singleton; the outgoing STORY-A is preserved
     # (covers a story decomposed before per-story snapshots existed).
     stages_mod.write_skeleton(repo, "STORY-B", [{"id": "T1", "title": "t"}])
-    assert json.loads(snap_a.read_text(encoding="utf-8"))["stages"][0]["status"] == "done"
+    assert json.loads(snap_a.read_text(encoding="utf-8"))["status"] == "done"
 
     # Each story shows its OWN stages; neither bleeds from the singleton.
     assert _stages_for(repo, "STORY-A")["stages"][0]["status"] == "done"
@@ -11801,11 +11803,9 @@ def test_stage_loop_orders_execution_and_gates_pr_ready(repo, tmp_path):
          "acceptance_criteria": ["rows show"]},
     ]}
     record_skeleton_then_frontier(repo, decomp["tasks"])
-    # Order is strict inside one story worktree.
+    # T2 depends on its predecessor T1 (no explicit dependencies), so it waits.
     code, out = run(repo, "forge.py", "stage", "start", "T2", "--trunk")
     assert code != 0 and "T1" in out
-    code, out = run(repo, "forge.py", "stage", "start", "T2", "--parallel")
-    assert code != 0 and "task stages are sequential" in out
     # done requires the stage to have actually started
     code, out = run(repo, "forge.py", "stage", "done", "T1")
     assert code != 0 and "not active" in out
@@ -12154,7 +12154,7 @@ def test_task_start_creates_worktree_off_main_and_gates_on_predecessor_marker(
     sources = seed_task_start_inputs(repo, key, [first, second], "T2")
     second_worktree = repo.parent / f"{repo.name}-{key}-T2"
     code, out = run(repo, "forge.py", "task", "start", "T2")
-    assert code != 0 and "predecessor T1 marker is absent" in out, out
+    assert code != 0 and "dependency T1 marker is absent" in out, out
     assert not second_worktree.exists()
 
     marker = repo / ".factory" / "stories" / key / "tasks" / "T1" / "pr-ready.json"
@@ -14168,7 +14168,7 @@ def test_stage_done_reloads_launch_after_proof_commands(repo, tmp_path):
     assert code != 0 and "no successful write launch" in out
 
 
-def test_stage_tasks_are_sequential_and_parallel_flag_is_refused(repo, tmp_path):
+def test_stage_start_gates_on_dependencies_not_list_order(repo, tmp_path):
     sign_off(repo)
     intake(repo)
     save_plan(repo, tmp_path)
@@ -14177,10 +14177,12 @@ def test_stage_tasks_are_sequential_and_parallel_flag_is_refused(repo, tmp_path)
         skeletal_stage_task("T2"),
     ]}
     record_skeleton_then_frontier(repo, decomp["tasks"])
+    # `--parallel` is gone: parallelism is decided by dependencies and scopes.
     code, out = run(repo, "forge.py", "stage", "start", "T2", "--parallel")
+    assert code != 0 and "unrecognized arguments: --parallel" in out
+    code, out = run(repo, "forge.py", "stage", "start", "T2", "--trunk")
     assert code != 0
-    assert "task stages are sequential" in out
-    assert "dependency-ready stories" in out
+    assert "T2 waits on unfinished dependency task(s): T1" in out
 
 
 def test_stage_done_ledgers_a_contract_rewritten_mid_stage(repo, tmp_path):
@@ -16992,13 +16994,13 @@ def test_task_frontier_honours_dependency_dag(repo, tmp_path):
     require_ready_task(repo, "T3", require_approval=False, require_grill=False)
     with pytest.raises(SystemExit, match="T4 is not ready: waiting on T2"):
         require_ready_task(repo, "T4", require_approval=False, require_grill=False)
-    # One active stage at a time: with T2 active, T3 must wait for it.
+    # With T2 active, T3 may still be grilled and approved; whether its stage
+    # can OPEN beside T2 is `stage start`'s scope check (test_task_parallelism).
     stages["stages"][1]["status"] = "active"
     write_stages(repo, stages)
     frontier = task_frontier_state(repo)
     assert frontier and frontier[1]["id"] == "T2"
-    with pytest.raises(SystemExit, match="T3 cannot start while T2 is active"):
-        require_ready_task(repo, "T3", require_approval=False, require_grill=False)
+    require_ready_task(repo, "T3", require_approval=False, require_grill=False)
 
 
 def test_stage_start_and_delegate_refuse_without_approved_task_plan(repo, tmp_path):

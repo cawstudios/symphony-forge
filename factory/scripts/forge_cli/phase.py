@@ -152,6 +152,44 @@ def _board_handoff(base: Path) -> str:
             else f"NO BOARD IS RUNNING — start one: `./forge board` ({url}).")
 
 
+_PARALLEL_COMMANDS = {
+    "await-merge": "./forge task pr-ready {id} (its own PR; merge in dependency order)",
+    "delegate": "./forge delegate {id} from inside its worktree",
+    "stage-start": "./forge task start {id}, then `./forge stage start {id}` from "
+                   "inside the worktree it prints",
+    "await-approval": "./forge task approve {id} --by \"<name>\" once the human "
+                      "has read it on the board",
+    "grill": "./forge grill run --gate task --task {id}",
+    "author-task-plan": "author its plan, then ./forge task plan save {id} --from <path>",
+    "author-contract": "author its contract and re-record the decomposition",
+}
+
+
+def _parallel_frontier(base: Path, first_id: str) -> list[str]:
+    """Every OTHER task that can move right now, one exact command each, plus
+    where each active stage lives. Tasks inside a story run in parallel when
+    their dependencies are done and their write scopes are disjoint."""
+    from factory_lib import task_frontier_items
+    from .stages import active_stages_everywhere, scope_conflicts
+    lines: list[str] = []
+    conflicts = scope_conflicts(base, first_id)
+    if conflicts:
+        lines.append(f"[dev] {first_id} collides with an active stage "
+                     f"({'; '.join(conflicts)}): grill and approve it now, but it "
+                     "starts only when that stage is done — never beside it.")
+    for state, task in task_frontier_items(base):
+        task_id = task.get("id", "")
+        if task_id == first_id:
+            continue
+        command = _PARALLEL_COMMANDS.get(state, state).format(id=task_id)
+        lines.append(f"[dev] Also ready in PARALLEL — {task_id} ({state}): {command}")
+    active = active_stages_everywhere(base)
+    if len(active) > 1 or (active and lines):
+        lines.append("Active stages per worktree: " + "; ".join(
+            f"{stage.get('id')} in {root}" for root, stage in active))
+    return lines
+
+
 def cmd_next(args: argparse.Namespace) -> None:
     base = Path(args.repo).resolve() if args.repo else repo_root()
     _auto_heal_roadmap_after_merge(base)
@@ -590,6 +628,7 @@ def cmd_next(args: argparse.Namespace) -> None:
                         "skills_used); apple-design advisory for gesture/motion — "
                         "harness.yaml required_skills"
                     )
+                steps.extend(_parallel_frontier(base, task_id))
         elif task_closeout:
             # Sourced from require_closeout_order so `forge next` and the ship
             # gate can never disagree: re-deriving the same facts twice is how

@@ -367,8 +367,7 @@ stories whose dependencies are all done — with a `git worktree add` + intake
 command per story. Each worktree is a full checkout on its own branch with
 its own `.factory/` state, so every gate (plan mode lock, plan grill,
 recorders, ship gate) applies per story, concurrently. Implementations may run
-concurrently across those story worktrees. Inside one story, leaf tasks run
-strictly in decomposition order with no parallel file edits. Convergence
+concurrently across those story worktrees. Convergence
 is designed to be conflict-free: `pr_ready.py` DELETES the task-scoped
 `.factory/` state after archiving it (history keeps the record) and reduces
 `run.json` to project fields + `last_shipped`, so merging story branches
@@ -377,6 +376,30 @@ collides on nothing but `plans/roadmap.json` status flips — and
 further-along status wins; mid-merge it rebuilds from the merge stages).
 Commit the archive when `pr_ready` tells you to: evidence that isn't
 committed isn't merged.
+
+**Tasks inside one story run in parallel too, when the plan allows it.** The
+order is the task dependency graph (`dependencies` in the decomposition; a task
+without an explicit list follows its predecessor), not the list. `forge task
+start <id>` opens a task's worktree once every dependency's marker is on the
+trunk, and `forge stage start <id>` opens its stage once the dependencies are
+done AND its write scope (area prefixes, amendments, the test files it must
+create) is disjoint from every stage active in any worktree of the story; an
+overlap is refused naming the sibling and the overlap, so the plan splits the
+areas or the tasks serialise — never a mid-run question to the human. Each
+task worktree has its own delegation lock and its own stage tracker, and it
+commits only its own stage record (`.factory/stories/<key>/stages/<task>.json`,
+one record per task, decision 0022), so two task PRs never rewrite one shared
+file. `forge next` lists every task that can move (the frontier first, then
+"also ready in PARALLEL" with the exact command each, then the active stages
+per worktree); a task waiting to merge is reported per task. Merge order is the
+dependency order: a task cannot `pr-ready` before its dependencies' markers are
+on the trunk, and siblings merge only through the trunk (merge the trunk into a
+sibling, re-verify, re-review; the human sees only PRs). A worker's
+`scope-change` signal that names a path inside a sibling's active scope is
+refused with the sibling named: the coordinator re-plans instead of
+arbitrating. The per-task brief carries the story's rulings and the sealed
+contracts of the tasks it builds on, so a parallel worker never asks what a
+sibling settled.
 
 ## Stage Loop — defects never enter history
 

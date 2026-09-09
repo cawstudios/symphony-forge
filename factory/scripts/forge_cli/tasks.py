@@ -262,16 +262,22 @@ def cmd_task_start(args: argparse.Namespace) -> None:
     task_marker_path(key, args.id)  # validates both branch/path components
 
     trunk = default_trunk_branch(base)
-    if index:
-        predecessor = tasks[index - 1].get("id")
-        if not task_marker_on_main(base, key, predecessor):
-            marker = task_marker_path(key, predecessor)
-            fail(
-                f"task {args.id} cannot start: predecessor {predecessor} marker "
-                f"is absent from fetched origin/{trunk} ({marker.as_posix()})"
-            )
-    else:
-        _require_git(base, f"fetching origin/{trunk}", "fetch", "origin", trunk)
+    _require_git(base, f"fetching origin/{trunk}", "fetch", "origin", trunk)
+    # The gate is the dependency graph, not the list order: a task starts once
+    # every task it depends on has its marker on the trunk, so independent
+    # tasks start side by side in their own worktrees.
+    from factory_lib import task_dependencies
+    shipped = {
+        task.get("id") for task in tasks
+        if task_marker_on_main(base, key, task.get("id"), refresh=False)
+    }
+    waiting = [d for d in task_dependencies(tasks, args.id) if d not in shipped]
+    if waiting:
+        markers = ", ".join(task_marker_path(key, d).as_posix() for d in waiting)
+        fail(
+            f"task {args.id} cannot start: dependency {', '.join(waiting)} marker "
+            f"is absent from fetched origin/{trunk} ({markers})"
+        )
     base_main_sha = _require_git(
         base, f"resolving fetched origin/{trunk}", "rev-parse", "--verify",
         f"origin/{trunk}^{{commit}}",
@@ -320,9 +326,9 @@ def cmd_task_start(args: argparse.Namespace) -> None:
             {
                 "id": task.get("id"),
                 "title": task.get("title"),
-                "status": "done" if position < index else "pending",
+                "status": "done" if task.get("id") in shipped else "pending",
             }
-            for position, task in enumerate(tasks)
+            for task in tasks
         ],
     }, indent=2) + "\n").encode()
 
