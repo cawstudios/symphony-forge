@@ -160,6 +160,8 @@ def _write_story_records(base: Path, issue: str, stages: list[dict],
     if legacy.is_file():
         for stage in load_json(legacy, default={}).get("stages") or []:
             stage_id = stage.get("id") if isinstance(stage, dict) else None
+            # Verbatim, no timestamps: two branches splitting the same file
+            # produce byte-identical sibling records that merge cleanly.
             if isinstance(stage_id, str) and Path(stage_id).name == stage_id \
                     and not (records / f"{stage_id}.json").is_file():
                 dump_json(records / f"{stage_id}.json", stage)
@@ -801,19 +803,30 @@ def effective_scope(base: Path, task_id: str, scope: list[str]) -> list[str]:
     return list(scope) + amended_scope_paths(base, task_id)
 
 
-def _overlap_scope(base: Path, task: dict) -> list[str]:
+def _at_revision(base: Path, revision: str, path: str) -> bool:
+    return subprocess.run(
+        ["git", "cat-file", "-e", f"{revision}:{path}"], cwd=base,
+        capture_output=True, env=clean_git_env(),
+    ).returncode == 0
+
+
+def _overlap_scope(base: Path, task: dict, stage: dict | None = None) -> list[str]:
     """Everything a task may write: its area prefixes, its amendments and the
     test files it must create. This is what two parallel tasks must not share."""
     task_id = str(task.get("id") or "")
     scope = effective_scope(base, task_id, task.get("write_scope") or [])
-    # A required test that is already TRACKED is a proof the task must not
-    # break, not a file it writes (required_tests_outside_scope draws the same
-    # line). Tracked, not merely present: a file this checkout created is new
-    # to the sibling's checkout too, and both must not write it.
+    # A required test that already exists at the BASE the task builds on is a
+    # proof the task must not break, not a file it writes
+    # (required_tests_outside_scope draws the same line). Judged at the stage's
+    # base — or, for a task not yet started, the trunk commit its worktree was
+    # cut from — never at this checkout's working tree: a file one branch
+    # created is still new to every sibling until it reaches the trunk.
+    revision = stage_baseline(base, stage) if stage else str(
+        load_json(run_state_path(base), default={}).get("base_main_sha") or "HEAD")
     scope += [
         path for path in (str((test or {}).get("path") or "")
                           for test in task.get("required_tests") or [])
-        if path and not _git(base, "ls-files", "--", path).strip()
+        if path and not _at_revision(base, revision, path)
     ]
     return [entry.strip().rstrip("/") for entry in scope if entry and entry.strip()]
 
@@ -860,7 +873,8 @@ def scope_conflicts(base: Path, task_id: str) -> list[str]:
         sibling = stage.get("id", "")
         if sibling == task_id:
             continue
-        theirs = _overlap_scope(root, task_for(root, sibling) or task_for(base, sibling))
+        theirs = _overlap_scope(
+            root, task_for(root, sibling) or task_for(base, sibling), stage)
         overlap = scope_overlap(mine, theirs)
         if overlap:
             conflicts.append(f"{sibling} ({root.name}): {', '.join(overlap)}")
@@ -1122,14 +1136,51 @@ def _cmd_start_locked(args: argparse.Namespace, base: Path) -> None:
     print(f"Stage {args.id} active — {stage.get('title')}")
 
 
+def stage_admission_lock_path(base: Path) -> Path:
+    """One lock for the whole repo: under git's COMMON dir, which every
+    linked worktree shares, so two `stage start`s in two worktrees serialise."""
+    common = _git(base, "rev-parse", "--git-common-dir").strip()
+    return (base / common).resolve() / "forge" / "stage-admission.lock"
+
+
+@contextlib.contextmanager
+def stage_admission(base: Path, *, timeout: float = 120.0):
+    """Hold the story-wide admission lock across check + activate, so the
+    disjointness scan and the tracker write are one step across worktrees.
+    A contender waits, then re-checks against what the winner activated."""
+    import time
+    from .delegate import _lock_file, _unlock_file
+    path = stage_admission_lock_path(base)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+", encoding="utf-8")
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                _lock_file(handle)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    fail(f"another `stage start` has held {path} for {timeout:.0f}s; "
+                         "retry once it finishes")
+                time.sleep(0.2)
+        yield
+    finally:
+        try:
+            _unlock_file(handle)
+        finally:
+            handle.close()
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     base = Path(args.repo).resolve() if args.repo else repo_root()
     from .delegate import delegation_exclusion
 
-    with delegation_exclusion(base, args.id, kind="stage-state"):
-        with delegation_exclusion(
-                base, "stages", kind="stage-state", namespace="state"):
-            _cmd_start_locked(args, base)
+    with stage_admission(base):
+        with delegation_exclusion(base, args.id, kind="stage-state"):
+            with delegation_exclusion(
+                    base, "stages", kind="stage-state", namespace="state"):
+                _cmd_start_locked(args, base)
 
 
 def _measure(base: Path, stage_id: str, stage: dict, task: dict) -> None:

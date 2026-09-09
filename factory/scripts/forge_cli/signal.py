@@ -187,7 +187,8 @@ def _refuse_sibling_scope(base: Path, message: str, refs: list[str]) -> None:
     named = _named_paths(message, refs)
     for root, stage in siblings:
         sibling = stage.get("id", "")
-        scope = _overlap_scope(root, task_for(root, sibling) or task_for(base, sibling))
+        scope = _overlap_scope(
+            root, task_for(root, sibling) or task_for(base, sibling), stage)
         hits = sorted({p for p in named if p and _covered(p.rstrip("/"), scope)})
         if hits:
             fail(f"scope-change refused: {', '.join(hits)} belongs to task {sibling}, "

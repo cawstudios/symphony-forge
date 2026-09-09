@@ -107,6 +107,27 @@ def test_tasks_with_disjoint_scopes_run_side_by_side_in_their_own_worktrees(repo
     assert task_frontier_state(repo)[1]["id"] == "T3"
     wt3 = _start_in_worktree(repo, T3)
     assert task_frontier_state(wt3)[1]["id"] == "T3", "a task worktree's frontier is its task"
+
+    # Check + activate is one step across worktrees: a starter blocked on the
+    # story-wide admission lock re-checks once it gets in, and refuses when
+    # the winner's scope now overlaps its own.
+    import sys
+    import time
+    from forge_cli.stages import scope_amendments_path, stage_admission
+    amendment = scope_amendments_path(wt2)
+    with stage_admission(repo):
+        blocked = subprocess.Popen(
+            [sys.executable, str(wt3 / "factory" / "scripts" / "forge.py"),
+             "stage", "start", "T3"], cwd=wt3,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        time.sleep(1.5)
+        assert blocked.poll() is None, "the second starter must wait for the lock"
+        amendment.write_text(json.dumps({"tasks": {"T2": {"added_paths": ["src/ui/"]}}}))
+    out, _ = blocked.communicate(timeout=120)
+    assert blocked.returncode != 0 and "T2" in out and "src/ui ~ src/ui" in out, out
+    assert _statuses(wt3)[2] == "pending"
+    amendment.unlink()
+
     code, out = run(wt3, "forge.py", "stage", "start", "T3")
     assert code == 0, out
     assert {s["id"] for _root, s in active_stages_everywhere(repo)} == {"T2", "T3"}
@@ -211,6 +232,15 @@ def test_required_test_counts_as_writable_until_it_is_tracked(repo):
     assert _overlap_scope(repo, task) == ["src/api", "tests/new_test.py"]
     assert scope_overlap(_overlap_scope(repo, task), ["tests/new_test.py"]) == [
         "tests/new_test.py ~ tests/new_test.py"]
+    # Committed on this branch but absent at the stage's BASE: still new to
+    # every sibling until it reaches the trunk, so it stays in the set.
+    base_sha = git(repo, "rev-parse", "HEAD")
+    git(repo, "add", "tests/new_test.py")
+    git(repo, "commit", "-qm", "the new proof")
+    assert _overlap_scope(repo, task, {"id": "T2", "base_sha": base_sha}) == [
+        "src/api", "tests/new_test.py"]
+    assert _overlap_scope(
+        repo, task, {"id": "T2", "base_sha": git(repo, "rev-parse", "HEAD")}) == ["src/api"]
 
 
 def _linked_worktree(repo: Path, name: str, task_id: str) -> Path:
@@ -253,3 +283,27 @@ def test_scope_change_names_root_level_files_too():
     assert _named_paths("also touch README.md, package.json and src/api/x.py.",
                         ["docs/a.md"]) == ["README.md", "package.json", "src/api/x.py", "docs/a.md"]
     assert _named_paths("no files named here", []) == []
+
+
+def test_two_task_worktrees_migrate_the_same_legacy_snapshot_identically(repo):
+    legacy = {"issue": "OLD-1", "stages": [
+        {"id": "T1", "title": "a", "status": "done", "base_sha": "abc"},
+        {"id": "T2", "title": "b", "status": "pending"},
+        {"id": "T3", "title": "c", "status": "pending"}]}
+    trees = {}
+    for task_id in ("T2", "T3"):
+        worktree = _linked_worktree(repo, f"OLD-1-{task_id}", task_id)
+        story = worktree / ".factory" / "stories" / "OLD-1"
+        story.mkdir(parents=True)
+        (story / "stages.json").write_text(json.dumps(legacy))
+        mine = {**legacy, "stages": [
+            {**s, "status": "active"} if s["id"] == task_id else s
+            for s in legacy["stages"]]}
+        write_stages(worktree, mine)
+        trees[task_id] = story / "stages"
+    records = lambda tree: {p.name: p.read_bytes() for p in tree.glob("*.json")}  # noqa: E731
+    a, b = records(trees["T2"]), records(trees["T3"])
+    assert set(a) == set(b) == {"T1.json", "T2.json", "T3.json"}
+    assert a["T1.json"] == b["T1.json"]  # sibling copied verbatim on both
+    assert json.loads(a["T2.json"])["status"] == "active" and json.loads(b["T2.json"])["status"] == "pending"
+    assert json.loads(b["T3.json"])["status"] == "active" and json.loads(a["T3.json"])["status"] == "pending"
