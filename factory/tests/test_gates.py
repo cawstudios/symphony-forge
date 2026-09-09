@@ -373,7 +373,7 @@ def seed_task_grill_frontier(repo: Path, task: dict) -> None:
     }))
     (control / "decomposition.json").write_text(json.dumps({
         "plan_file": plan.relative_to(repo).as_posix(),
-        "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+        "plan_sha256": plan_digest_without_assumptions(plan),
         "tasks": [task],
     }))
     task_plan = repo / ".factory" / "task-plans" / f"{task['id']}.md"
@@ -14688,7 +14688,7 @@ def test_decomposition_provenance_overrides_agent_supplied_fields(repo, tmp_path
         "story": "AGENT-9",
         "epic": "agent-epic",
         "plan_file": "plans/active/agent.md",
-        "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+        "plan_sha256": plan_digest_without_assumptions(plan),
     }
     code, out = run(
         repo, "record_decomposition_from_json.py",
@@ -14708,7 +14708,7 @@ def test_decomposition_provenance_overrides_agent_supplied_fields(repo, tmp_path
         "story": "ENG-1",
         "epic": "billing",
         "plan_file": state["plan_file"],
-        "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+        "plan_sha256": plan_digest_without_assumptions(plan),
     }
 
 
