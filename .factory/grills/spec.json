@@ -2,43 +2,22 @@
   "generated_by": "griller",
   "gate": "spec",
   "verdict": "pass",
-  "questions_asked": 2,
-  "summary": "Re-confirmation grill for plan-approval after rewriting the not-the-enforcement-signal clause: plan mode is the authorship proof via permission_mode markers (0048) while the human-attributed approval command remains the separate unforgeable act (0029 intact); every other clause stands. Recorded under the new enforcement.",
-  "inspected_refs": [
-    "docs/specs/plan-approval.md",
-    "docs/decisions/0048-plan-mode-and-grill-provenance.md",
-    "docs/decisions/0029-plan-approval-in-plan-mode.md"
-  ],
   "gaps": [
-    "PA-1: plan-approval now says plan mode IS the authorship proof via permission_mode markers, while human approval stays the separate unforgeable act (0029 intact). Correct split?",
-    "PA-2: no other clause of plan-approval changes (self-authored-grill criticism, digest freshness, awaiting\u2192approved flow all stand). Frontier empty on this spec?"
+    "The first-task rule conflicts with retained --trunk preparation instructions.",
+    "The review-only draft PR lacks an explicit executable command and provenance boundary.",
+    "Decision0063 lacks explicit acceptance and closure coverage."
   ],
   "contradictions": [],
   "resolutions": [
-    "Confirmed by the human in the recorded round: Yes \u2014 authorship proof vs approval act, both required",
-    "Confirmed by the human in the recorded round: Yes \u2014 rest of the spec stands; frontier empty"
+    "The specification now makes the first native foreground task exclusively use real source contract/grill/approval, existing task start, exact prepared target and fresh target contract/grill/approval. It expressly excludes --trunk for this task. The historical repository bootstrap draft now carries an explicit obsolete-execution banner preserving its original bytes below. The current personal story is being reconciled before any plan recording. First admitted work also owns the minimal workspace-creation ordering repair for successors; TASKS retains attachment and the remaining journey. No second ordering exception or writer bypass is introduced.",
+    "The existing0054 marker-free checkpoint now explicitly authorizes exact git push and gh pr list/create --draft/checks command shapes with verified repository/head/base/commit, complete non-platform task/source-test/three-lens review preconditions, clean product state, uncertainty-aware PR reuse and existing scratchpad/test-report provenance. Normal forge task pr-ready is expressly not invoked while live platform cells are missing. No marker, readiness, promotion, merge or protected-state bypass follows from the draft operation. This names the already accepted operation rather than adding a new runtime feature.",
+    "AC11 now explicitly covers the0063 source and fresh-target planning sequence and its placeholder/incomplete-source and stale-source-proof refusal regressions, plus actual first-run observation. The current-amendment list includes0063, the revision summary links these additions and the existing standing authorization is attributed truthfully. Technical convergence does not claim current implementation or tests; the actual first task owns the bounded repairs/tests and must pass its own JIT and delivery gates."
   ],
-  "rounds": [
-    {
-      "question": "PA-1: plan-approval now says plan mode IS the authorship proof via permission_mode markers, while human approval stays the separate unforgeable act (0029 intact). Correct split?",
-      "options": [
-        "Yes \u2014 authorship proof vs approval act, both required",
-        "No, re-word"
-      ],
-      "chosen": "Yes \u2014 authorship proof vs approval act, both required"
-    },
-    {
-      "question": "PA-2: no other clause of plan-approval changes (self-authored-grill criticism, digest freshness, awaiting\u2192approved flow all stand). Frontier empty on this spec?",
-      "options": [
-        "Yes \u2014 rest of the spec stands; frontier empty",
-        "Something else needs amending"
-      ],
-      "chosen": "Yes \u2014 rest of the spec stands; frontier empty",
-      "frontier_empty": true
-    }
-  ],
+  "rounds": [],
   "open_items": [],
-  "input_sha256": "4b60063080c79ac88fa26cf7e930e6a06b8232e8edefc0101c360f53de07e878",
-  "recorded_at": "2026-08-24T10:58:38+00:00",
-  "commit": "ef8e1c5dba9bf83475527bfdf4a31d5a8b3b260d"
+  "frontier_empty": true,
+  "summary": "Actual independent native Forge spec read launch-2d3f446242d44641a8f3f3e2c7f1b045, session01a08946-d024-7d03-99f0-f57aa3c83cc0 completed and returned these three findings. Main resolved them against inspected source and accepted0054/0058/0059/0063, amended the saved artifact and records the explicit empty frontier without a redundant cold read or invented structured rounds. The user standing statement on2026-09-10 authorizes all remaining in-scope work; the separate actual confirmation command will bind this finalized spec. No story/task approval, worker contribution, code verification or live platform proof is inferred from this technical pass.",
+  "input_sha256": "9b9bde7c83a44152c3c839fdf4ba61a4f8f9b15864a4d45344d14b1a2cd001e8",
+  "recorded_at": "2026-09-10T03:20:43+00:00",
+  "commit": "78e5ea5b3dd183dc2a0457c1d7d18c4462e43f9c"
 }
