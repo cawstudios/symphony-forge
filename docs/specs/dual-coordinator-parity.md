@@ -2,7 +2,7 @@
 slug: dual-coordinator-parity
 title: Either Claude or Codex can coordinate the same Forge workflow
 status: confirmed
-saved: 2026-09-10T07:54:32+00:00
+saved: 2026-09-10T08:26:21+00:00
 ---
 
 # Either Claude or Codex can coordinate the same Forge workflow
@@ -279,8 +279,8 @@ file/line risk bounds instead of obsolete byte splitting.
 
 The review-only parity checkpoint may create/reuse a Git-only draft PR after
 normal contribution, verification, and independent review. Its body names
-every missing native cell. It stays unmerged and receives no Forge task-ready
-marker while platform proof is incomplete. It is not forge task pr-ready and
+every missing required platform result and accepted unobserved platform limitation. It stays unmerged and receives no Forge task-ready
+marker while required platform proof is incomplete. It is not forge task pr-ready and
 does not bypass guard, admission, review, or protected state. After complete
 proof, the same task repeats readiness/review as needed, seals normally, and
 reaches refreshed trunk before closeout. No duplicate PR, marker, proof, or
@@ -291,35 +291,70 @@ branch, base branch, and exact reviewed head commit. Query existing PRs with
 that repository/head/base; an uncertain, failed or ambiguous lookup stops
 creation. If creation returns an uncertain result, query again before any
 retry; never create blindly. Preserve the existing PR identity in the current
-scratchpad/report and reuse it after platform completion. Normal readiness
+scratchpad/report and reuse it after required platform proof is complete. Normal readiness
 creates the eventual task marker once and retries preserve its identity and
 timestamp. These requirements belong to Shared's PR retry path and Integration's
 actual checkpoint; no new PR registry or marker substitute is introduced.
 
-The six native cells are CLI and Desktop on macOS, Ubuntu 24.04 LTS x64
-Linux, and native Windows. WSL2 is fallback, not native Windows proof. Each
-cell records actual runtime/build, OS/CPU, trusted hook source, command or
-interaction, completed question/event identity, payload mapping, launch/log
-references, startup/resume/clear/compact observation, denied coordinator
-write, admitted worker, and truthful terminal outcome. Unsupported/incomplete
-event shape leaves the cell unverified. Fixture normalization is regression
-evidence only. Independent review checks all six cells against actual logs;
-there is no new six-cell omission schema. The final integration implementer
-authors the existing `factory/schemas/test-automated.json` payload with
-`generated_by: implementer`; `record_test_from_json.py --kind automated` writes
-`.factory/stories/FORGE-COORD-1/tasks/FORGE-COORD-1.1/tests.json`. Its required
-verification checks that all six labels occur once and pass with cited live
-evidence; otherwise report status and verification stay failed. C10 propagates
-that result to local, committed-CI, board and seal checks. The report uses exactly
-these fixed pass_fail_summary labels: native-cli-macos,
-native-desktop-macos, native-cli-linux-ubuntu-24.04-x64,
-native-desktop-linux-ubuntu-24.04-x64, native-cli-windows, and
-native-desktop-windows. Each row states passed, failed, or unobserved plus
-runtime/build and log/event references. Actual commands/interactions go in
-commands_run; every failed or unobserved row appears in both remaining_gaps
-and blocking_findings. Aggregate status stays failed until every required cell
-passes. These are entries in existing report fields, not new schema properties
-or a matrix artifact. A failed aggregate is explicit.
+The platform evidence contract follows accepted 0065-ci-platform-evidence,
+which amends 0064's six-live-cell requirement. Require actual local macOS
+native CLI and Desktop proof plus Ubuntu 24.04 LTS x64 and native Windows CI.
+Keep the six existing labels for platform coverage accounting. Each row says
+whether its evidence is live runtime, CI regression/package smoke, or
+unobserved; a passed CI row never claims an authenticated live runtime or
+Desktop interaction. WSL cannot satisfy native Windows.
+
+The required rows are native-cli-macos and native-desktop-macos with actual
+local proof, native-cli-linux-ubuntu-24.04-x64 with Ubuntu CI proof, and
+native-cli-windows with native Windows CI proof. CI preserves the full Ubuntu
+harness suite and existing native Windows gates, and exercises native
+launcher/admission, hooks, recovery and portable-delivery regressions on the
+actual runner OS. Install the real Codex CLI package at an explicit reviewed
+version and record its version/help smoke outcome. An authenticated native
+task uses only existing authorized CI authentication when available; otherwise
+state that live-task behavior is unobserved. Package/help smoke certifies only
+package/argument-parser startup. Fixture normalization remains regression
+proof. Required CI commands must succeed and collect meaningful tests; empty
+or wholly skipped selections cannot pass.
+
+Retain native-desktop-linux-ubuntu-24.04-x64 and native-desktop-windows as
+unobserved when no genuine Desktop host is available. Their absence, and
+unavailable authenticated CLI observations beyond required CI coverage, are
+accepted limitations under 0065 and do not block this delivery. Record those
+limitations explicitly; never mark an unrun Desktop observation passed or
+infer it from CLI/CI. Any actually observed correctness/security failure,
+including in a normally unobserved path, still blocks readiness.
+
+Each row records actual OS/CPU, tested revision, runtime/build where installed,
+evidence kind, commands/interactions and durable logs. Live Mac observations
+identify trusted hook registrations, startup/resume/clear/compact, denied
+coordinator writes, admitted work and truthful terminal outcomes. Include
+completed question/event identity and mapping when an optional structured
+interaction is supported and actually used; otherwise use the permitted
+main-chat route and state the unavailable optional mechanism. Missing required
+behavior or an observed failure blocks; optional interactions are not invented.
+
+The final integration implementer authors the existing
+factory/schemas/test-automated.json payload with generated_by: implementer;
+record_test_from_json.py --kind automated writes
+.factory/stories/FORGE-COORD-1/tasks/FORGE-COORD-1.1/tests.json. Use only the
+existing fields status, summary, commands_run, pass_fail_summary,
+remaining_gaps and blocking_findings. pass_fail_summary contains each existing
+label exactly once: native-cli-macos, native-desktop-macos,
+native-cli-linux-ubuntu-24.04-x64,
+native-desktop-linux-ubuntu-24.04-x64, native-cli-windows and
+native-desktop-windows. Each row states passed/failed/unobserved and its
+explicit evidence kind and references. Actual commands/interactions go in
+commands_run. Every failure and unobserved limitation appears in remaining_gaps.
+Actual failures and missing required evidence also appear in blocking_findings.
+The accepted unavailable Desktop/live-CLI observations remain limitations
+without becoming blockers merely because they were not observed. State the
+CI-backed coverage limitation in summary. Aggregate status and required
+verification pass only when the four required rows, other task checks and
+required client proof pass and no actual blocker remains. C10 propagates that
+result to local, committed-CI, board and seal checks. Independent review checks
+required results and limitations against actual logs. Evidence kind is text
+in existing fields, not a schema property, new report or second authority.
 
 Main creates a separate fresh Task tracker client under /tmp with private
 origin, meaningful CI, and normal confirmed-spec/story/task lifecycle. It is
@@ -327,7 +362,7 @@ a dogfood consumer, not harness-task contribution. Its UI task is user_facing
 true and must show real functional proof. Its admitted worker contributes real
 code, tests, verification, review, functional evidence, PR, and green CI.
 Forge parity integration is user_facing false under the current per-task
-definition but still needs native cells and lifecycle proof. Record exact
+definition but still needs the required platform results and lifecycle proof. Record exact
 client repository, commits, PR, and logs in the existing report; missing
 client proof blocks the claim.
 
@@ -337,7 +372,7 @@ separately reviewed semantic repairs, then mandatory Ruff 0.16.6 and Pyright
 configuration and deliberate violations fail. Generated clients declare their
 own stack checks. Staging delays activation but never weakens final coverage.
 Full quality and parity ship only after activated quality, AC1-AC12, C1-C10,
-and all six native cells pass.
+and the required local Mac and Linux/Windows CI results pass, with unobserved live-platform limitations stated.
 
 ### Durable decisions, events, and client migration
 
@@ -463,13 +498,13 @@ These are ownership candidates, not approved wildcard scopes.
 6. At the review-only draft checkpoint, delegation, deterministic verification,
    lossless independent review, and honest source proof run without fabricated
    evidence; incomplete platform proof remains explicit. Final readiness,
-   marker, shipping, and closeout require all six cells and task/worktree/
-   shipping checks. Support-task proof remains separate; the six-cell matrix
-   is native Codex only.
+   marker, shipping, and closeout require the local Mac and Linux/Windows CI results and task/worktree/
+   shipping checks. Support-task proof remains separate; platform coverage rows
+   cover native Codex only, and CI-backed rows state only their observed coverage.
 7. After separately approved 0058 support tasks, final integration uses the
    approved stage route, real schema recorders, actual runtime evidence, and
-   an unmerged review-only draft with no task marker. Missing live proof blocks
-   readiness; complete proof permits the same task's normal closure.
+   an unmerged review-only draft with no task marker. Missing required proof blocks
+   readiness; accepted unavailable-platform limitations remain explicit, and complete required proof permits the same task's normal closure.
 8. Setup honors explicit/environment/detected/interactive selection and
    cancel/EOF refusal before install, passes selection to both doctors, and
    preserves project configuration, historical evidence, and both adapters in
@@ -548,7 +583,7 @@ questions do not satisfy approval; no cross-session registry exists.
 
 C8. A real native worker contributes after stage start and before stage done,
 passes verification and independent review, and records all required
-CLI/Desktop platform observations before final parity readiness/shipping.
+local Mac and Linux/Windows CI results before final parity readiness/shipping, with unavailable live-platform observations reported honestly.
 
 C9. Task, branch, and autoreview briefs include complete approval-bound task
 plan and automated-test report. Prose deliverables remain valid when the
@@ -568,14 +603,14 @@ task singleton.
 
 ## Proof and handoff boundary
 
-The six-cell matrix, separate /tmp Task tracker client, first native
+The platform evidence contract, separate /tmp Task tracker client, first native
 source/target transition, original preparation bytes, ten client failures,
 AC1-AC12, and C1-C10 are closure obligations. C1-C10 alone cannot establish
 whole-spec closure. Before recording contracts, map each criterion to an
 owning task and actual evidence. Support tasks may own complete prepared native
 changes, workflow/workspace/delivery changes, or quality predecessors under
 0058/0055/0056; final parity owns integrated behavior and confirms activated
-quality and six live cells. No omitted or partially reviewed bytes may ship.
+quality and required local Mac/Linux/Windows CI proof, with live-platform limitations stated. No omitted or partially reviewed bytes may ship.
 
 The approved roadmap amendment at e218db6 and reviewed proposal digest
 c37199034d36f19942d133c691a5bc234df1f756a9c1347ae176640090af27ab remain
@@ -584,4 +619,4 @@ IDs in story depends_on. Exact scopes/tests are bound by saved story/task
 plans; the replaced 39-row graph is not an approved wildcard. Temporary
 review, /tmp, and preparation paths are inputs until needed facts are
 preserved in repository-owned records. This draft does not authorize
-implementation, merge, release, or platform-proof substitution.
+implementation, merge, or release outside the approved task route. Platform evidence follows accepted 0065; CI is never represented as unobserved live Desktop behavior.

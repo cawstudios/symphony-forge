@@ -236,7 +236,7 @@
       "verification": [
         "Exact optional question/session/tool/turn/story/free-text/replay/cancel cases; no fabricated approvals",
         "Wrong story/owner, dirty/unregistered/independent-clone target and unproven sealed state refuse without destructive repair",
-        "Actual board functional proof, fresh-context/PR/handoff recovery and six-cell inputs"
+        "Actual board functional proof, fresh-context/PR/handoff recovery and platform evidence inputs"
       ]
     },
     {
@@ -365,7 +365,8 @@
       "owned_behavior": [
         "Fix every remaining Ruff/Pyright diagnostic against actual post-format tree",
         "Pin exact tools/config and Python3.11; same full authored source/test scope locally and CI",
-        "Enforce missing configuration/tool and deliberate violations; meaningful client-language validation"
+        "Enforce missing configuration/tool and deliberate violations; meaningful client-language validation",
+        "In the already owned factory-scaffold workflow, require actual Ubuntu24.04 x64 and native Windows native-regression coverage and explicitly pinned real Codex CLI package/version/help smoke under0065; preserve current full-suite and Windows gates."
       ],
       "planning_surfaces": [
         "All authored Python source/test semantic diagnostic owners",
@@ -384,7 +385,8 @@
         "Meaningful behavior regressions for semantic changes",
         "Missing tools/config and planted violations fail; local/CI agreement; client discriminator does not bypass client product checks",
         "Exact pinned shared command and each negative activation case in quality_contract",
-        "Remeasure after FORMAT predecessor; refuse any budget/semantic/complete-lossless-review failure before seal"
+        "Remeasure after FORMAT predecessor; refuse any budget/semantic/complete-lossless-review failure before seal",
+        "Capture actual CI head/run/job/image/OS/CPU/build/command/log evidence; meaningful required native tests pass, no empty/wholly skipped selection or CLI-to-Desktop claim."
       ]
     },
     {
@@ -413,7 +415,7 @@
       ],
       "owned_behavior": [
         "Full integrated AC1-12 and roadmap acceptance",
-        "Six actual native CLI/Desktop platform observations and complete logs",
+        "Required local Mac and Linux/Windows CI proof, complete logs and explicit unavailable live-platform limitations",
         "Separate /tmp Task tracker installed client, own private origin/CI and complete native task lifecycle",
         "Existing story outcome only after every real predecessor marker is on trunk"
       ],
@@ -422,7 +424,7 @@
         "Separate client worktree/origin: its own authorized product and proof"
       ],
       "verification": [
-        "All six cells verified, no CLI-to-Desktop or WSL-to-native-Windows substitution",
+        "Required local Mac and Linux/Windows CI results pass; unavailable live observations remain explicit; no CLI/CI-to-Desktop or WSL-to-native-Windows claim",
         "Client admitted contribution plus tests/verify/review/functional proof/PR/green CI",
         "Integration report references exact client origin/commit/PR/artifact/log paths; no copied harness proof"
       ]
@@ -613,11 +615,11 @@
         "PORTABLE-DELIVERY-MIGRATION",
         "FORGE-COORD-1.1"
       ],
-      "proof": "Host-permitted actual answers/approvals, exact optional question events, native-only launch/setup and six actual cells"
+      "proof": "Host-permitted actual answers/approvals, exact optional question events, native-only launch/setup and required local Mac and Linux/Windows CI results with live-platform limitations"
     },
     {
       "criterion": 3,
-      "statement": "After the existing approvals, explicitly scoped native bootstrap support tasks may use the existing isolated candidate under Decision0058 and deliver prepared changes through complete, independently reviewed support PRs. Validate exact scopes, target preparation, baselines and complete review boundaries before execution. Preserve genuine approvals, registered delegated writes, existing review limits, normal task PR gates, actual predecessor markers on main and sequential merge ordering for this overlapping bootstrap and quality delivery; native write-hook activation and legitimate worker admission land together. General dependency-ready scheduling under Decision0059 remains available where dependencies and disjoint scopes permit. Separately approved staged quality-cleanup predecessor tasks activate mandatory full-repository quality checks before full parity ships. FORGE-COORD-1.1 completes the remaining bounded parity integration and its approval-to-PR chain, including all six required native live platform cells before full parity shipping. Original prepared bootstrap bytes retain their provenance and are reviewed completely, but are not credited as delegated contribution.",
+      "statement": "After the existing approvals, explicitly scoped native bootstrap support tasks may use the existing isolated candidate under Decision0058 and deliver prepared changes through complete, independently reviewed support PRs. Validate exact scopes, target preparation, baselines and complete review boundaries before execution. Preserve genuine approvals, registered delegated writes, existing review limits, normal task PR gates, actual predecessor markers on main and sequential merge ordering for this overlapping bootstrap and quality delivery; native write-hook activation and legitimate worker admission land together. General dependency-ready scheduling under Decision0059 remains available where dependencies and disjoint scopes permit. Separately approved staged quality-cleanup predecessor tasks activate mandatory full-repository quality checks before full parity ships. FORGE-COORD-1.1 completes the remaining bounded parity integration and its approval-to-PR chain, including required local macOS native proof and passing Ubuntu 24.04 x64/native Windows CI before parity shipping, with unavailable Linux/Windows live CLI/Desktop observations recorded as accepted limitations under Decision0065. Original prepared bootstrap bytes retain their provenance and are reviewed completely, but are not credited as delegated contribution.",
       "owners": [
         "NATIVE-FOREGROUND-ACTIVATE",
         "LEAN-WORKFLOW",
@@ -628,7 +630,7 @@
         "QUALITY-BASELINE",
         "FORGE-COORD-1.1"
       ],
-      "proof": "Original inventory and exact owner contributions, complete reviewed inputs, task markers, full quality, separate installed client and six verified native cells"
+      "proof": "Original inventory and exact owner contributions, complete reviewed inputs, task markers, full quality, separate installed client and required local Mac and Linux/Windows CI proof with live-platform limitations"
     }
   ],
   "versioned_target": "plans/exploration/coordinator-parity-preparation/lean-delivery-graph.json; main must copy before approval",
@@ -2738,7 +2740,7 @@
       "native-cli-windows",
       "native-desktop-windows"
     ],
-    "rules": "Each fixed label appears in pass_fail_summary with passed/failed/unobserved, actual runtime/build and log/event references. commands_run lists real commands/interactions; failed/unobserved cells appear in both remaining_gaps and blocking_findings. status remains failed until every native cell and required client evidence passes. Existing test-automated schema and recorder only; no new matrix artifact."
+    "rules": "Each of the six fixed labels occurs once in pass_fail_summary with passed/failed/unobserved, explicit evidence kind, tested revision, OS/CPU/runtime build and exact command/log references. Native-cli-macos and native-desktop-macos require actual local observations. Native-cli-linux-ubuntu-24.04-x64 and native-cli-windows require meaningful actual OS CI regressions and pinned real CLI package/version/help smoke; state unavailable authenticated runtime behavior. The two Linux/Windows Desktop rows remain explicitly unobserved where no host exists. Accepted0065 limitations stay in remaining_gaps without becoming blockers solely from absence. Actual failures and missing required evidence appear in both remaining_gaps and blocking_findings. Aggregate passes only with all four required rows, required client evidence and other task checks passing and no blocker. CI/CLI never certifies unobserved Desktop. Existing schema fields/recorder only; no new matrix artifact."
   },
   "recurring_finding_disposition": {
     "owner": "PORTABLE-DELIVERY-MIGRATION",
@@ -2791,9 +2793,9 @@
   "roadmap_limit_interpretation": "The existing review limits phrase means the actual installed helper safeguards under accepted0064, which expressly amends obsolete0058/spec caps; no helper limit edit or implicit patch cap.",
   "confirmed_spec": {
     "path": "docs/specs/dual-coordinator-parity.md",
-    "sha256": "674f1db7ef6355b414fc1efb3201234404217c3b187e7a5007a1922027f6ef34",
+    "sha256": "bb3c94c137c7f1ec56d4e5f5814ee634a1683997a906b66600d476063929b557",
     "status": "confirmed through actual main-owned save/grill/confirm route"
   },
   "retention_contract_source": "Confirmed docs/specs/dual-coordinator-parity.md and accepted0064; all necessary scope and proof is included here and in the bound story plan.",
-  "draft_checkpoint_contract": "SHARED-COORDINATOR-JOURNEY owns verified origin/head repository/branch/base/reviewed-commit matching, refusal on uncertain lookup and requery after uncertain creation. FORGE-COORD-1.1 uses Git/gh draft operations without forge task pr-ready while native cells are missing. Reuse one PR and preserve eventual marker identity/timestamp; no new registry."
+  "draft_checkpoint_contract": "SHARED-COORDINATOR-JOURNEY owns verified origin/head repository/branch/base/reviewed-commit matching, refusal on uncertain lookup and requery after uncertain creation. FORGE-COORD-1.1 uses Git/gh draft operations without forge task pr-ready while required platform results are missing. Reuse one PR and preserve eventual marker identity/timestamp; no new registry."
 }
